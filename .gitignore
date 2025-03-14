@@ -172,3 +172,12 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+
+.DS_Store
+Thumbs.db
+api.key
+credentials.json
+db_schema.json
+cache/*
+exports/*

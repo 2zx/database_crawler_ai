@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+psycopg2
+pandas==1.5.3
+numpy==1.23.5
+pandasai
+openai
+streamlit==1.22.0
+requests
+paramiko
+sshtunnel
+matplotlib

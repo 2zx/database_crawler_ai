@@ -1,0 +1,31 @@
+services:
+  backend:
+    build: .
+    working_dir: /app
+    volumes:
+      - .:/app  # 🔥 Monta il codice locale nel container
+    ports:
+      - "8000:8000"
+    networks:
+      - mynetwork
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  frontend:
+    build: .
+    working_dir: /app
+    volumes:
+      - .:/app  # 🔥 Monta il codice locale nel container
+      - frontend_data:/app/data  # Volume persistente per le credenziali
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    networks:
+      - mynetwork
+    command: ["streamlit", "run", "frontend.py", "--server.port=8501", "--server.address=0.0.0.0"]
+
+networks:
+  mynetwork:
+
+volumes:
+  frontend_data:
