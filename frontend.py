@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import json
 import os
+import base64
 import matplotlib.pyplot as plt
 import pandas as pd
 from io import BytesIO
@@ -49,12 +50,14 @@ credentials["db_user"] = st.sidebar.text_input("Utente Database", value=credenti
 credentials["db_password"] = st.sidebar.text_input("Password Database", type="password", value=credentials.get("db_password", ""))
 credentials["db_name"] = st.sidebar.text_input("Nome Database", value=credentials.get("db_name", "mio_database"))
 
+
 def get_ssh_config():
     return {
         "ssh_host": credentials["ssh_host"],
         "ssh_user": credentials["ssh_user"],
         "ssh_key": credentials["ssh_key"]
     }
+
 
 def get_db_config():
     return {
@@ -64,6 +67,7 @@ def get_db_config():
         "password": credentials["db_password"],
         "database": credentials["db_name"]
     }
+
 
 # **Salva le credenziali quando cambia un valore**
 if st.sidebar.button("Salva credenziali"):
@@ -85,8 +89,33 @@ BACKEND_URL = "http://backend:8000"
 domanda_selezionata = st.selectbox("Seleziona una domanda", ["Scrivi la tua domanda..."] + DOMANDE_SUGGERITE)
 domanda_input = st.text_input("Oppure scrivi una domanda libera:")
 
-# **Bottone di ricerca**
-if st.button("Cerca"):
+# ✅ Checkbox per forzare la rigenerazione della query senza cache
+force_no_cache = st.checkbox("Forza rigenerazione query SQL (ignora cache)")
+
+# Inizializziamo lo stato dei pulsanti (se non esiste)
+if "cerca_clicked" not in st.session_state:
+    st.session_state.cerca_clicked = False
+
+if "refresh_clicked" not in st.session_state:
+    st.session_state.refresh_clicked = False
+
+# Creiamo due colonne per i pulsanti
+col1, col2 = st.columns([1, 1])
+
+
+# Pulsante "Cerca" nella prima colonna
+with col1:
+    if st.button("🔍 Cerca", use_container_width=True):
+        st.session_state.cerca_clicked = True  # ✅ Settiamo lo stato su True
+
+with col2:
+    if st.button("🔄 Riscansiona Database", use_container_width=True):
+        st.session_state.refresh_clicked = True  # ✅ Settiamo lo stato su True
+
+# Esegui "Cerca"
+if st.session_state.cerca_clicked:
+    st.session_state.cerca_clicked = False  # ✅ Resettiamo lo stato
+
     domanda = domanda_input if domanda_input else domanda_selezionata
     if domanda:
         st.info("Analisi in corso...")
@@ -110,16 +139,26 @@ if st.button("Cerca"):
                 st.write(f"analisi: {data['descrizione']}")
                 st.write(f"query: {data['query_sql']}")
 
+                cache_used = data["cache_used"]
+
+                # ✅ Notifica all'utente se la cache è stata usata
+                if cache_used:
+                    st.success("✅ Risultato generazione SQL preso dalla cache!")
+                else:
+                    st.warning("⚠️ La query è stata rigenerata senza cache.")
+
                 # **2️⃣ Visualizza i dati in tabella**
                 df = pd.DataFrame(data["dati"])
                 st.subheader("📋 Dati Analizzati:")
                 st.dataframe(df)
 
-                # **3️⃣ Mostra i grafici generati da SmartDataframe**
+                # **3️⃣ Mostra i grafici**
                 if "grafici" in data and data["grafici"]:
                     st.subheader("📊 Grafici Generati dall'AI")
-                    for grafico in data["grafici"]:
-                        st.pyplot(grafico)  # ✅ Mostriamo direttamente i grafici generati da SmartDataframe
+                    for grafico_base64 in data["grafici"]:
+                        img_bytes = base64.b64decode(grafico_base64)
+                        img = BytesIO(img_bytes)
+                        st.image(img, use_column_width=True)  # ✅ Mostriamo i grafici dal Base64
 
                 # **4️⃣ Scarica il file Excel**
                 if not df.empty:
@@ -136,8 +175,10 @@ if st.button("Cerca"):
         else:
             st.error("❌ Errore nell'elaborazione della richiesta.")
 
-# **Bottone per riscansionare la struttura del database**
-if st.button("🔄 Riscansiona Database"):
+# esegui "Riscansiona Database"
+if st.session_state.refresh_clicked:
+    st.session_state.refresh_clicked = False  # ✅ Resettiamo lo stato
+
     st.info("Avvio riscansione del database...")
     response = requests.post(f"{BACKEND_URL}/refresh_schema", json={
         "ssh_config": get_ssh_config(),

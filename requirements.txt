@@ -12,3 +12,6 @@ requests
 paramiko
 sshtunnel
 matplotlib
+sentence-transformers
+faiss-cpu
+xlsxwriter

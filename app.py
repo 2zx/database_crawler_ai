@@ -9,12 +9,16 @@ import io
 from query_ai import generate_sql_query, process_query_results
 from db_schema import get_db_schema
 import logging
+from database import create_db
 
 # Configura il logging per vedere gli errori nel container
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# ✅ Assicuriamoci che il database sia pronto all'avvio dell'app
+create_db()
 
 
 class SSHConfig(BaseModel):
@@ -36,6 +40,7 @@ class QueryRequest(BaseModel):
     openai_api_key: str
     ssh_config: SSHConfig
     db_config: DBConfig
+    force_no_cache: bool = False
 
 
 class RefreshRequest(BaseModel):
@@ -127,8 +132,10 @@ def query_database(request: QueryRequest):
         db_schema = get_db_schema(engine)
         logger.info(f"📊 Struttura del database recuperata: {db_schema.keys()}")
 
+        use_cache = not request.force_no_cache  # Se `force_no_cache` è True, ignoriamo la cache
+
         # Genera la query SQL con AI
-        sql_query = generate_sql_query(request.domanda, db_schema, request.openai_api_key)
+        sql_query, cache_used = generate_sql_query(request.domanda, db_schema, request.openai_api_key, use_cache)
         logger.info(f"📝 Query SQL generata dall'AI: {sql_query}")
 
         # rimuovo prefisso SQL se presente
@@ -151,6 +158,7 @@ def query_database(request: QueryRequest):
         logger.info("🔌 Tunnel SSH chiuso.")
 
         risposta["query_sql"] = sql_query
+        risposta["cache_used"] = cache_used
 
         return risposta
 
