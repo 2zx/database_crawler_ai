@@ -60,6 +60,22 @@ Clicca su **"Riscansiona Database"** nel frontend per aggiornare: ✅ Tabelle, c
 
 ---
 
+## 📂 Struttura della Codebase
+```
+📦 database_crawler_ai
+├── 📄 app.py               # Backend FastAPI per gestione query
+├── 📄 frontend.py          # Interfaccia utente Streamlit
+├── 📄 query_ai.py          # Generazione di query SQL con OpenAI
+├── 📄 query_cache.py       # Gestione cache delle query SQL
+├── 📄 db_schema.py         # Estratto e cache della struttura del database
+├── 📄 database.py          # Configurazione e gestione del database SQLite
+├── 📄 requirements.txt     # Librerie necessarie
+├── 📄 docker-compose.yml   # Configurazione Docker
+└── 📄 Dockerfile           # Dockerfile per il backend
+```
+
+---
+
 ## 🛠️ API Endpoints
 
 📡 L'API backend espone i seguenti endpoint:
@@ -87,7 +103,8 @@ POST /query
     "user": "admin",
     "password": "admin",
     "database": "vendite"
-  }
+  },
+  "force_no_cache": false
 }
 ```
 
@@ -96,6 +113,20 @@ POST /query
 ```http
 POST /refresh_schema
 ```
+
+## 🚀 Gestione della Cache
+### 1️⃣ **Cache delle Query SQL**  
+Il sistema salva le query SQL generate dall'AI in **SQLite**, riducendo il numero di chiamate a OpenAI.
+- **Matching con AI**: Le nuove domande vengono confrontate con quelle già esistenti tramite il modello **SentenceTransformers**.
+- **Indice FAISS**: Accelera la ricerca delle domande più simili.
+- **Indice su `db_hash`**: Filtra direttamente nel database per evitare confronti inutili.
+
+📌 **Forzare una nuova query**: L'utente può scegliere di ignorare la cache selezionando un'opzione nell'interfaccia.
+
+### 2️⃣ **Cache della Struttura del Database**
+Per evitare di interrogare il database a ogni richiesta, la struttura viene **salvata in un file JSON**. Se il database cambia:
+- Il sistema rigenera l'hash della struttura e invalida la cache.
+- Le query salvate vengono ignorate se non sono più coerenti con il database attuale.
 
 ---
 
