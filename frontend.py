@@ -155,10 +155,7 @@ if st.session_state.cerca_clicked:
                 # **3️⃣ Mostra i grafici**
                 if "grafici" in data and data["grafici"]:
                     st.subheader("📊 Grafici Generati dall'AI")
-                    for grafico_base64 in data["grafici"]:
-                        img_bytes = base64.b64decode(grafico_base64)
-                        img = BytesIO(img_bytes)
-                        st.image(img, use_column_width=True)  # ✅ Mostriamo i grafici dal Base64
+                    st.image(data["grafici"], caption="Grafico Generato", use_column_width=True)
 
                 # **4️⃣ Scarica il file Excel**
                 if not df.empty:
