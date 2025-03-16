@@ -2,8 +2,10 @@ import base64
 import io
 import pandas as pd
 import matplotlib.pyplot as plt
+import os
 from sqlalchemy.sql import text
 from openai import OpenAI
+from openai import ChatCompletion
 from pandasai import SmartDataframe
 from pandasai.llm.openai import OpenAI as OpenAILLM
 from query_cache import get_cached_query, save_query_to_cache
@@ -14,6 +16,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 AI_MODEL = "gpt-4o-mini"
+EXPORT_PATH = "exports/charts/"
+os.makedirs(EXPORT_PATH, exist_ok=True)
+
+OPENAI_CLIENT = None
 
 
 def encode_figure_to_base64(fig):
@@ -56,12 +62,13 @@ def generate_sql_query(domanda, db_schema, openai_api_key, use_cache=True):
     Genera **solo** la query SQL senza alcuna spiegazione o testo aggiuntivo.
     Verifica che la query sia sintatticamente corretta e coerente con la struttura del database e con la domanda dell'utente.
     Ricontrolla più volte in base allo schema DB per assicurarti che restituisca i risultati attesi.
+    Non generare mai valori inventati.
     """
 
-    client = OpenAI(api_key=openai_api_key)  # ✅ Nuovo modo di inizializzare OpenAI
+    get_openai_client(openai_api_key)
 
     try:
-        response = client.chat.completions.create(
+        response = OPENAI_CLIENT.chat.completions.create(
             model=AI_MODEL,  # ✅ Usiamo gpt-4o-mini per generare query SQL
             messages=[
                 {"role": "system", "content": "Sei un assistente SQL esperto."},
@@ -81,11 +88,22 @@ def generate_sql_query(domanda, db_schema, openai_api_key, use_cache=True):
         return None, None
 
 
-def process_query_results(engine, sql_query, openai_api_key):
+def process_query_results(engine, sql_query, domanda, openai_api_key):
     """
     Esegue la query SQL generata dall'AI, analizza i dati e restituisce una risposta leggibile.
     """
     try:
+        # rimuovo prefisso SQL se presente
+        if "```" in sql_query:
+            sql_query = sql_query.split("```")[1].strip()
+        if sql_query.lower().startswith("sql"):
+            sql_query = sql_query[3:].strip()
+
+        # Verifica se la query è valida
+        if not sql_query.lower().startswith("select"):
+            logger.error(f"❌ Query non valida generata: {sql_query}")
+            raise Exception("L'AI ha generato una query non valida.")
+
         # ✅ Connessione corretta con SQLAlchemy 2.0
         with engine.connect() as connection:
             df = pd.read_sql(text(sql_query), connection)  # ✅ Usa text() e connection
@@ -104,46 +122,107 @@ def process_query_results(engine, sql_query, openai_api_key):
 
         # ✅ Configurazione OpenAI per PandasAI
         llm = OpenAILLM(api_token=openai_api_key, model=AI_MODEL)
-        sdf = SmartDataframe(df, config={"llm": llm})
+        sdf = SmartDataframe(df, config={
+            "llm": llm,
+            "save_charts": False,
+            "custom_whitelisted_dependencies": ["pandas", "matplotlib", "numpy", "seaborn", "plotly"]
+        })
 
         # ✅ Chiediamo all'AI di spiegare i dati senza grafici
-        risposta = sdf.chat("Descrivi questi dati in modo chiaro e utile nella lingua dell'utente che fa la domanda.")
+        risposta = sdf.chat(f"""
+            **Domanda dell'utente**
+            "{domanda}"
 
-        # ✅ Chiediamo all'AI di generare codice Matplotlib per i grafici
-        codice_grafico = sdf.chat("""Genera codice Matplotlib per visualizzare i dati,
-            in un modo significativo ed efficace,
-            tutti con testi ed etichette nella lingua dell'utente che fa la domanda."
-            Produci almeno 2 visualizzazioni per aumentare la leggibilità del dato.
-            Restituisci solo codice Python per creare i grafici, senza spiegazioni o testo aggiuntivo
-            così da poterlo eseguire con excec().
-            Usa `dfs = pd.DataFrame(data)` per definire il DataFrame.
-            Assicurati che `dfs` sia sempre un DataFrame Pandas.""")
+            Sulla base della domanda descrivi i dati forniti in modo chiaro e utile
+            nella lingua dell'utente senza grafici, solo testo.""")
 
-        # ✅ Eseguiamo il codice Matplotlib per creare i grafici
-        grafici_base64 = []
-        try:
-            local_vars = {}
-            exec(codice_grafico, {"plt": plt}, local_vars)  # ✅ Eseguiamo il codice AI in un ambiente sicuro
-            figs = [v for v in local_vars.values() if isinstance(v, plt.Figure)]
+        plot_code = generate_plot_code_with_gpt(df, openai_api_key)  # ✅ Generiamo il codice per il grafico
 
-            for fig in figs:
-                grafici_base64.append(encode_figure_to_base64(fig))
-
-        except Exception as e:
-            grafici_base64 = []
-            print(f"❌ codice Matplotlib generato dall'AI: {codice_grafico}")
-            print(f"❌ Errore nell'esecuzione del codice Matplotlib generato dall'AI: {e}")
+        if plot_code:
+            path_grafico = execute_generated_plot_code(plot_code)  # ✅ Eseguiamo il codice per generare il grafico
 
         return {
             "descrizione": risposta,
             "dati": df.to_dict(orient="records"),
-            "grafici": grafici_base64  # ✅ Restituiamo i grafici generati dall'AI
+            "grafici": path_grafico if "generated_plot" in path_grafico else None  # ✅ Restituiamo i grafici generati dall'AI
         }
 
     except Exception as e:
+
         return {
             "errore": f"❌ Errore nell'elaborazione dei dati: {str(e)}",
             "descrizione": "❌ Errore nell'analisi.",
             "dati": [],
             "grafici": []
         }
+
+
+def generate_plot_code_with_gpt(df, openai_api_key):
+    """
+    Chiede a OpenAI di generare codice Matplotlib basato sui dati.
+    """
+    prompt = f"""
+    Genera un grafico Matplotlib per visualizzare i seguenti dati:
+    {df.head().to_string()}
+
+    Il codice deve:
+    - Usare plt.plot(), plt.bar() o plt.scatter() in base ai dati.
+    - Aggiungere titolo, assi e griglia.
+    - Salvare l'immagine in '{EXPORT_PATH}/generated_plot.png'.
+    - Non mostrare il grafico (plt.show()).
+
+    Ritorna SOLO il codice Python, senza commenti o altro.
+    """
+
+    get_openai_client(openai_api_key)
+
+    response = OPENAI_CLIENT.chat.completions.create(
+        model=AI_MODEL,
+        messages=[{"role": "system", "content": "Sei un esperto di analisi dati."},
+                  {"role": "user", "content": prompt}]
+    )
+
+    plot_code = response.choices[0].message.content.strip()
+    plot_code = clean_generated_code(plot_code)  # ✅ Rimuoviamo ```python e ```
+
+    # ✅ Salviamo il codice in un file Python per debugging
+    with open(f"{EXPORT_PATH}/generated_plot.py", "w") as f:
+        f.write(plot_code)
+
+    return plot_code
+
+def get_openai_client(openai_api_key):
+    global OPENAI_CLIENT
+    if not OPENAI_CLIENT:
+        OPENAI_CLIENT = OpenAI(api_key=openai_api_key)
+
+
+def clean_generated_code(code):
+    """
+    Rimuove le righe ` ```python ` e ` ``` ` dal codice generato.
+    """
+    lines = code.strip().split("\n")
+
+    # ✅ Se il codice inizia con ```python, rimuoviamo la prima riga
+    if lines[0].startswith("```"):
+        lines = lines[1:]
+
+    # ✅ Se il codice termina con ```, rimuoviamo l'ultima riga
+    if lines[-1].startswith("```"):
+        lines = lines[:-1]
+
+    return "\n".join(lines)
+
+
+def execute_generated_plot_code(plot_code):
+    """
+    Esegue il codice Matplotlib generato da OpenAI in un ambiente sicuro.
+    """
+    try:
+        logger.info("📊 Esecuzione del codice generato per il grafico")
+        exec(plot_code, {"plt": plt, "pd": pd})
+        logger.info("📊 Esecuzione OK")
+        return f"{EXPORT_PATH}/generated_plot.png"
+    except Exception as e:
+        logger.error(f"Errore nell'esecuzione del codice generato: {e}")
+        return f"Errore nell'esecuzione del codice generato: {e}"

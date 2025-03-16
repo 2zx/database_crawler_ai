@@ -138,19 +138,8 @@ def query_database(request: QueryRequest):
         sql_query, cache_used = generate_sql_query(request.domanda, db_schema, request.openai_api_key, use_cache)
         logger.info(f"📝 Query SQL generata dall'AI: {sql_query}")
 
-        # rimuovo prefisso SQL se presente
-        if "```" in sql_query:
-            sql_query = sql_query.split("```")[1].strip()
-        if sql_query.lower().startswith("sql"):
-            sql_query = sql_query[3:].strip()
-
-        # Verifica se la query è valida
-        if not sql_query.lower().startswith("select"):
-            logger.error(f"❌ Query non valida generata: {sql_query}")
-            raise HTTPException(status_code=400, detail="L'AI ha generato una query non valida.")
-
         # Esegue la query e ottiene il risultato
-        risposta = process_query_results(engine, sql_query, request.openai_api_key)
+        risposta = process_query_results(engine, sql_query, request.domanda, request.openai_api_key)
         logger.info("✅ Query eseguita con successo!")
 
         # Chiude il tunnel SSH
