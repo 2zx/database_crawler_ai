@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import os
 from sqlalchemy.sql import text
 from openai import OpenAI
-from openai import ChatCompletion
 from pandasai import SmartDataframe
 from pandasai.llm.openai import OpenAI as OpenAILLM
 from query_cache import get_cached_query, save_query_to_cache
@@ -190,6 +189,7 @@ def generate_plot_code_with_gpt(df, openai_api_key):
         f.write(plot_code)
 
     return plot_code
+
 
 def get_openai_client(openai_api_key):
     global OPENAI_CLIENT
