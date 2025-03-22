@@ -1,7 +1,7 @@
 import json
 import os
 import logging
-from sqlalchemy import inspect
+from sqlalchemy import inspect   # type: ignore
 import hashlib
 
 DB_SCHEMA_CACHE_PATH = "/app/db_schema.json"  # 🔥 Percorso del file di cache della struttura
@@ -30,7 +30,7 @@ def get_db_schema(engine, force_refresh=False):
         if table_name.startswith("wizard_") or table_name.startswith("ir_"):
             continue  # Ignora le tabelle temporanee
 
-        if not table_name.startswith("product") and not table_name.startswith("sale") and not "invoice" in table_name:
+        if not table_name.startswith("product") and not table_name.startswith("sale") and "invoice" not in table_name:
             continue
 
         logger.info(f"📊 Ispeziono tabella {table_name}")

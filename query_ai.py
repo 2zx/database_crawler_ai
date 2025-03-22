@@ -1,12 +1,12 @@
 import base64
 import io
-import pandas as pd
-import matplotlib.pyplot as plt
+import pandas as pd  # type: ignore
+import matplotlib.pyplot as plt  # type: ignore
 import os
-from sqlalchemy.sql import text
-from openai import OpenAI
-from pandasai import SmartDataframe
-from pandasai.llm.openai import OpenAI as OpenAILLM
+from sqlalchemy.sql import text  # type: ignore
+from openai import OpenAI  # type: ignore
+from pandasai import SmartDataframe  # type: ignore
+from pandasai.llm.openai import OpenAI as OpenAILLM  # type: ignore
 from query_cache import get_cached_query, save_query_to_cache
 import logging
 

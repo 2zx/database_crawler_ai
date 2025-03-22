@@ -1,10 +1,8 @@
-import streamlit as st
-import requests
+import streamlit as st  # type: ignore
+import requests  # type: ignore
 import json
 import os
-import base64
-import matplotlib.pyplot as plt
-import pandas as pd
+import pandas as pd  # type: ignore
 from io import BytesIO
 
 CREDENTIALS_FILE = "/app/credentials.json"

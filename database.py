@@ -1,5 +1,4 @@
 import sqlite3
-import numpy as np
 import os
 
 DB_PATH = "query_cache.db"

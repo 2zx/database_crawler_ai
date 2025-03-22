@@ -1,7 +1,7 @@
 import sqlite3
-import numpy as np
-import faiss
-from sentence_transformers import SentenceTransformer
+import numpy as np  # type: ignore
+import faiss  # type: ignore
+from sentence_transformers import SentenceTransformer  # type: ignore
 import database
 from db_schema import get_db_structure_hash
 import logging
@@ -22,7 +22,6 @@ def encode_embedding(embedding):
 def decode_embedding(embedding_blob):
     """Converte un embedding binario in numpy array."""
     return np.frombuffer(embedding_blob, dtype=np.float32)
-
 
 
 def get_cached_query(domanda):
@@ -54,10 +53,10 @@ def get_cached_query(domanda):
     index.add(embeddings)
 
     # ✅ Troviamo la domanda più simile
-    D, I = index.search(np.array([domanda_vec], dtype=np.float32), 1)
+    score, indices = index.search(np.array([domanda_vec], dtype=np.float32), 1)
 
-    best_match_idx = I[0][0]
-    best_match_score = D[0][0]
+    best_match_idx = indices[0][0]
+    best_match_score = score[0][0]
 
     if best_match_score < 0.2:  # 🔥 Se è abbastanza simile, la riutilizziamo
 
@@ -79,7 +78,7 @@ def save_query_to_cache(domanda, query_sql):
     conn = sqlite3.connect(database.DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO query_cache (domanda, query_sql, db_hash, embedding) 
+        INSERT INTO query_cache (domanda, query_sql, db_hash, embedding)
         VALUES (?, ?, ?, ?)
     """, (domanda, query_sql, db_hash, domanda_vec.astype(np.float32).tobytes()))
     conn.commit()

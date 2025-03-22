@@ -1,9 +1,9 @@
-import uvicorn
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from sshtunnel import SSHTunnelForwarder
-import paramiko
-from sqlalchemy import create_engine
+import uvicorn  # type: ignore
+from fastapi import FastAPI, HTTPException  # type: ignore
+from pydantic import BaseModel  # type: ignore
+from sshtunnel import SSHTunnelForwarder  # type: ignore
+import paramiko  # type: ignore
+from sqlalchemy import create_engine  # type: ignore
 import traceback
 import io
 from query_ai import generate_sql_query, process_query_results
