@@ -10,6 +10,7 @@ import numpy as np  # type: ignore
 from sentence_transformers import SentenceTransformer  # type: ignore
 import faiss  # type: ignore
 import os
+from config import DB_URL, EMBEDDINGS_PATH, CACHE_DIR
 
 # Configura il logging
 logging.basicConfig(level=logging.INFO)
@@ -17,11 +18,6 @@ logger = logging.getLogger(__name__)
 
 # Definizione del modello del database
 Base = declarative_base()
-
-# Percorso della cache (in memoria o su disco)
-CACHE_PATH = "cache/embeddings"
-os.makedirs(CACHE_PATH, exist_ok=True)
-DB_PATH = "sqlite:///cache/query_cache.db"
 
 
 class QueryCache(Base):
@@ -31,13 +27,14 @@ class QueryCache(Base):
     domanda = Column(String, primary_key=True)
     embedding = Column(String)  # Serializzazione dell'embedding
     query_sql = Column(Text)
+    db_hash = Column(String)
 
     def __repr__(self):
         return f"<QueryCache(domanda='{self.domanda}', query_sql='{self.query_sql[:30]}...')>"
 
 
 # Inizializzazione del database
-engine = create_engine(DB_PATH)
+engine = create_engine(DB_URL)
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 
@@ -57,8 +54,8 @@ def load_embedding_model():
             model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
         # Caricamento dell'indice FAISS se esiste
-        faiss_index_path = os.path.join(CACHE_PATH, "faiss_index.bin")
-        mapping_path = os.path.join(CACHE_PATH, "id_to_domanda.npy")
+        faiss_index_path = os.path.join(EMBEDDINGS_PATH, "faiss_index.bin")
+        mapping_path = os.path.join(EMBEDDINGS_PATH, "id_to_domanda.npy")
 
         if os.path.exists(faiss_index_path) and os.path.exists(mapping_path):
             logger.info("Caricamento dell'indice FAISS esistente...")
@@ -126,8 +123,8 @@ def rebuild_faiss_index():
             id_to_domanda = {i: domanda for i, domanda in enumerate(domande)}
 
             # Salva l'indice e la mappatura
-            faiss_index_path = os.path.join(CACHE_PATH, "faiss_index.bin")
-            mapping_path = os.path.join(CACHE_PATH, "id_to_domanda.npy")
+            faiss_index_path = os.path.join(CACHE_DIR, "faiss_index.bin")
+            mapping_path = os.path.join(CACHE_DIR, "id_to_domanda.npy")
             faiss.write_index(index, faiss_index_path)
             np.save(mapping_path, id_to_domanda)
 
@@ -150,6 +147,10 @@ def get_cached_query(domanda, similarity_threshold=0.85):
         La query SQL dalla cache se esiste una voce simile, altrimenti None
     """
     try:
+        # Ottieni l'hash della struttura del database corrente
+        from db_schema import get_db_structure_hash
+        current_db_hash = get_db_structure_hash() or ""
+
         # Carica il modello di embedding se non è già caricato
         if model is None or index is None:
             load_embedding_model()
@@ -158,7 +159,7 @@ def get_cached_query(domanda, similarity_threshold=0.85):
         embedding = model.encode([domanda])
 
         # Cerca le domande più simili nell'indice
-        if index.ntotal > 0:
+        if index and index.ntotal > 0:
             distances, indices = index.search(embedding.astype('float32'), 1)
 
             # Se la similarità è abbastanza alta
@@ -172,7 +173,11 @@ def get_cached_query(domanda, similarity_threshold=0.85):
                 session.close()
 
                 if cache_entry:
-                    return cache_entry.query_sql
+                    # Verifica se la struttura del database è cambiata
+                    if cache_entry.db_hash == current_db_hash or not cache_entry.db_hash:
+                        return cache_entry.query_sql
+                    else:
+                        logger.info(f"⚠️ Schema DB cambiato, ignoro la query in cache per '{similar_question}'")
 
         return None
     except Exception as e:
@@ -207,6 +212,10 @@ def save_query_to_cache(domanda, query_sql):
         # Calcola l'embedding della domanda
         embedding = model.encode([domanda])[0]
 
+        # Ottieni l'hash della struttura del database corrente
+        from db_schema import get_db_structure_hash
+        db_hash = get_db_structure_hash() or ""
+
         # Salva o aggiorna la query nel database
         session = Session()
 
@@ -217,6 +226,7 @@ def save_query_to_cache(domanda, query_sql):
             if existing_entry:
                 # Aggiorniamo l'entry esistente
                 existing_entry.query_sql = query_sql
+                existing_entry.db_hash = db_hash
                 session.commit()
                 logger.info(f"Query aggiornata per '{domanda}'")
             else:
@@ -224,7 +234,8 @@ def save_query_to_cache(domanda, query_sql):
                 cache_entry = QueryCache(
                     domanda=domanda,
                     embedding=','.join(map(str, embedding)),
-                    query_sql=query_sql
+                    query_sql=query_sql,
+                    db_hash=db_hash
                 )
                 session.add(cache_entry)
                 session.commit()
@@ -241,6 +252,7 @@ def save_query_to_cache(domanda, query_sql):
                 existing_entry = session.query(QueryCache).filter_by(domanda=domanda).first()
                 if existing_entry:
                     existing_entry.query_sql = query_sql
+                    existing_entry.db_hash = db_hash
                     session.commit()
                     logger.info(f"Query aggiornata per '{domanda}' dopo errore di integrità")
                     rebuild_faiss_index()

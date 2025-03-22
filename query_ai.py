@@ -10,13 +10,11 @@ from query_cache import get_cached_query, save_query_to_cache
 from hint_manager import format_hints_for_prompt
 import logging
 from llm_manager import get_llm_instance
+from config import CHARTS_DIR
 
 # Configura il logging per vedere gli errori nel container
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-EXPORT_PATH = "exports/charts/"
-os.makedirs(EXPORT_PATH, exist_ok=True)
 
 # Ora supportiamo diversi LLM
 LLM_INSTANCE = None
@@ -219,7 +217,7 @@ def generate_plot_code_with_gpt(df, llm_config):
     Il codice deve:
     - Usare plt.plot(), plt.bar() o plt.scatter() in base ai dati.
     - Aggiungere titolo, assi e griglia.
-    - Salvare l'immagine in '{EXPORT_PATH}/generated_plot.png'.
+    - Salvare l'immagine in '{CHARTS_DIR}/generated_plot.png'.
     - Non mostrare il grafico (plt.show()).
     - Tenere in considerazione le istruzioni per l'interpretazione dei dati.
 
@@ -237,7 +235,7 @@ def generate_plot_code_with_gpt(df, llm_config):
         plot_code = clean_generated_code(plot_code)  # ✅ Rimuoviamo ```python e ```
 
         # ✅ Salviamo il codice in un file Python per debugging
-        with open(f"{EXPORT_PATH}/generated_plot.py", "w") as f:
+        with open(f"{CHARTS_DIR}/generated_plot.py", "w") as f:
             f.write(plot_code)
 
         return plot_code
@@ -271,7 +269,7 @@ def execute_generated_plot_code(plot_code):
         logger.info("📊 Esecuzione del codice generato per il grafico")
         exec(plot_code, {"plt": plt, "pd": pd})
         logger.info("📊 Esecuzione OK")
-        return f"{EXPORT_PATH}/generated_plot.png"
+        return os.path.join(CHARTS_DIR, "generated_plot.png")
     except Exception as e:
         logger.error(f"Errore nell'esecuzione del codice generato: {e}")
         return f"Errore nell'esecuzione del codice generato: {e}"

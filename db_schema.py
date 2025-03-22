@@ -3,8 +3,8 @@ import os
 import logging
 from sqlalchemy import inspect  # type: ignore
 import hashlib
+from config import DB_SCHEMA_CACHE_PATH
 
-DB_SCHEMA_CACHE_PATH = "/app/db_schema.json"  # 🔥 Percorso del file di cache della struttura
 logger = logging.getLogger(__name__)
 
 
@@ -31,15 +31,22 @@ def get_db_schema(engine, force_refresh=False):
         ignore_prefixes = [
             "base_",
             "mail_",
-            "wizard_",
             "ir_",
-            "report_",
-            "wkf"
+            "wkf",
+            "printing_",
+            "cleanup_",
+            "mis_report",
+            "tags_",
+            "tmp_"
         ]
 
-        for prefix in ignore_prefixes:
-            if table_name.startswith(prefix):
-                continue  # Ignora le tabelle temporanee
+        # Verifica se la tabella ha un prefisso da ignorare
+        should_ignore = any(table_name.startswith(prefix) for prefix in ignore_prefixes)
+
+        # Salta questa tabella se ha un prefisso da ignorare
+        if should_ignore or "report" in table_name or "wizard" in table_name:
+            logger.info(f"⏭️ Ignoro tabella {table_name} (prefisso nella lista da ignorare)")
+            continue
 
         logger.info(f"📊 Ispeziono tabella {table_name}")
         columns = inspector.get_columns(table_name)

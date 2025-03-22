@@ -179,6 +179,5 @@ Thumbs.db
 api.key
 credentials.json
 db_schema.json
-query_cache.db
 cache/*
 exports/*

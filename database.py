@@ -1,7 +1,6 @@
 import sqlite3
 import os
-
-DB_PATH = "query_cache.db"
+from config import DB_PATH
 
 
 def create_db():

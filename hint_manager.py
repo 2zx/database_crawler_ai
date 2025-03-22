@@ -9,6 +9,7 @@ import logging
 from sqlalchemy import Column, Integer, String, Text, create_engine  # type: ignore
 from sqlalchemy.orm import sessionmaker, declarative_base  # type: ignore
 from datetime import datetime
+from config import HINT_DB_URL, HINTS_FILE
 
 # Configura il logging
 logging.basicConfig(level=logging.INFO)
@@ -16,13 +17,6 @@ logger = logging.getLogger(__name__)
 
 # Definizione del modello del database
 Base = declarative_base()
-
-# Percorso del database
-DB_PATH = "sqlite:///cache/hint_store.db"
-HINTS_FILE = "cache/hints.json"
-
-# Assicurati che la directory esista
-os.makedirs("cache", exist_ok=True)
 
 
 class DataHint(Base):
@@ -41,7 +35,7 @@ class DataHint(Base):
 
 
 # Inizializzazione del database
-engine = create_engine(DB_PATH)
+engine = create_engine(HINT_DB_URL)
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 

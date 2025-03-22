@@ -10,6 +10,7 @@ from query_ai import generate_sql_query, process_query_results
 from db_schema import get_db_schema
 import logging
 from database import create_db
+from database import DB_PATH as DATABASE_PATH
 from hint_manager import (
     add_hint, update_hint, delete_hint, toggle_hint_status,
     get_all_hints, get_active_hints, get_hint_by_id,
@@ -229,9 +230,8 @@ def get_hint_categories():
 
     # Aggiungiamo categorie basate sulla tabella
     try:
-        # Creiamo un motore di database temporaneo per accedere alla struttura
-        # Questo è solo un esempio, potremmo usare la struttura cached
-        engine = create_engine("sqlite:///cache/query_cache.db")
+        # Usare il percorso standardizzato
+        engine = create_engine(f"sqlite:///{DATABASE_PATH}")
         db_schema = get_db_schema(engine, force_refresh=False)
 
         if db_schema:
