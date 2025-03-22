@@ -10,6 +10,12 @@ from query_ai import generate_sql_query, process_query_results
 from db_schema import get_db_schema
 import logging
 from database import create_db
+from hint_manager import (
+    add_hint, update_hint, delete_hint, toggle_hint_status,
+    get_all_hints, get_active_hints, get_hint_by_id,
+    format_hints_for_prompt, export_hints_to_json, import_hints_from_json
+)
+from typing import Optional
 
 # Configura il logging per vedere gli errori nel container
 logging.basicConfig(level=logging.INFO)
@@ -35,9 +41,16 @@ class DBConfig(BaseModel):
     database: str
 
 
+class LLMConfig(BaseModel):
+    provider: str
+    api_key: str
+    model: Optional[str] = None
+    secret_key: Optional[str] = None  # Per Baidu ERNIE
+
+
 class QueryRequest(BaseModel):
     domanda: str
-    openai_api_key: str
+    llm_config: LLMConfig
     ssh_config: SSHConfig
     db_config: DBConfig
     force_no_cache: bool = False
@@ -46,6 +59,17 @@ class QueryRequest(BaseModel):
 class RefreshRequest(BaseModel):
     ssh_config: SSHConfig
     db_config: DBConfig
+
+
+class HintRequest(BaseModel):
+    hint_text: str
+    hint_category: str = "generale"
+
+
+class HintUpdateRequest(BaseModel):
+    hint_text: Optional[str] = None
+    hint_category: Optional[str] = None
+    active: Optional[int] = None
 
 
 def create_ssh_tunnel(ssh_host, ssh_user, ssh_key, db_host, db_port):
@@ -106,11 +130,136 @@ def refresh_db_schema(request: RefreshRequest):
         raise HTTPException(status_code=500, detail=f"Errore durante la riscansione: {str(e)}")
 
 
+# Endpoint per la gestione degli hint
+@app.get("/hints")
+def get_hints():
+    """Recupera tutti gli hint."""
+    return get_all_hints()
+
+
+@app.get("/hints/active")
+def get_hints_active():
+    """Recupera solo gli hint attivi."""
+    return get_active_hints()
+
+
+@app.get("/hints/{hint_id}")
+def get_hint(hint_id: int):
+    """Recupera un hint specifico."""
+    hint = get_hint_by_id(hint_id)
+    if hint:
+        return hint
+    raise HTTPException(status_code=404, detail="Hint non trovato")
+
+
+@app.post("/hints")
+def create_hint(request: HintRequest):
+    """Crea un nuovo hint."""
+    hint_id = add_hint(request.hint_text, request.hint_category)
+    if hint_id:
+        return {"status": "success", "id": hint_id}
+    raise HTTPException(status_code=500, detail="Errore nella creazione dell'hint")
+
+
+@app.put("/hints/{hint_id}")
+def modify_hint(hint_id: int, request: HintUpdateRequest):
+    """Aggiorna un hint esistente."""
+    success = update_hint(
+        hint_id,
+        request.hint_text,
+        request.hint_category,
+        request.active
+    )
+    if success:
+        return {"status": "success"}
+    raise HTTPException(status_code=404, detail="Hint non trovato o errore nell'aggiornamento")
+
+
+@app.delete("/hints/{hint_id}")
+def remove_hint(hint_id: int):
+    """Elimina un hint."""
+    success = delete_hint(hint_id)
+    if success:
+        return {"status": "success"}
+    raise HTTPException(status_code=404, detail="Hint non trovato o errore nell'eliminazione")
+
+
+@app.put("/hints/{hint_id}/toggle")
+def toggle_hint(hint_id: int):
+    """Attiva o disattiva un hint."""
+    success = toggle_hint_status(hint_id)
+    if success:
+        return {"status": "success"}
+    raise HTTPException(status_code=404, detail="Hint non trovato o errore nel cambio di stato")
+
+
+@app.get("/hints/formatted")
+def get_formatted_hints():
+    """Recupera gli hint formattati per il prompt."""
+    formatted = format_hints_for_prompt()
+    return {"hints_formatted": formatted}
+
+
+@app.post("/hints/export")
+def export_hints():
+    """Esporta gli hint in un file JSON."""
+    success = export_hints_to_json()
+    if success:
+        return {"status": "success"}
+    raise HTTPException(status_code=500, detail="Errore nell'esportazione degli hint")
+
+
+@app.post("/hints/import")
+def import_hints():
+    """Importa gli hint da un file JSON."""
+    success = import_hints_from_json()
+    if success:
+        return {"status": "success"}
+    raise HTTPException(status_code=500, detail="Errore nell'importazione degli hint")
+
+
+@app.get("/hints/categories")
+def get_hint_categories():
+    """
+    Restituisce le categorie di hint suggerite.
+    Queste categorie includono "generale" e opzioni basate sulla struttura del database.
+    """
+    # Otteniamo le categorie predefinite
+    categories = ["generale"]
+
+    # Aggiungiamo categorie basate sulla tabella
+    try:
+        # Creiamo un motore di database temporaneo per accedere alla struttura
+        # Questo è solo un esempio, potremmo usare la struttura cached
+        engine = create_engine("sqlite:///cache/query_cache.db")
+        db_schema = get_db_schema(engine, force_refresh=False)
+
+        if db_schema:
+            # Aggiungiamo categorie per tabelle
+            for table_name in db_schema.keys():
+                if table_name != "relationships":
+                    categories.append(f"tabella:{table_name}")
+
+                    # Aggiungiamo categorie per colonne
+                    if isinstance(db_schema[table_name], dict) and "colonne" in db_schema[table_name]:
+                        for column in db_schema[table_name]["colonne"]:
+                            categories.append(f"colonna:{table_name}.{column}")
+    except Exception as e:
+        logger.error(f"❌ Errore nel recupero delle categorie: {e}")
+
+    return {"categories": categories}
+
+
 @app.post("/query")
 def query_database(request: QueryRequest):
     """Gestisce la query AI attraverso il tunnel SSH verso PostgreSQL."""
     try:
         logger.info(f"📥 Ricevuta richiesta: {request.domanda}")
+        logger.info(f"📥 Provider LLM: {request.llm_config.provider}")
+
+        # Loghiamo se stiamo forzando l'ignore cache
+        if request.force_no_cache:
+            logger.info("⚠️ Forzata rigenerazione query SQL (ignorata cache)")
 
         # Crea il tunnel SSH
         ssh_tunnel = create_ssh_tunnel(
@@ -132,14 +281,31 @@ def query_database(request: QueryRequest):
         db_schema = get_db_schema(engine)
         logger.info(f"📊 Struttura del database recuperata: {db_schema.keys()}")
 
-        use_cache = not request.force_no_cache  # Se `force_no_cache` è True, ignoriamo la cache
+        # Se `force_no_cache` è True, ignoriamo la cache
+        use_cache = not request.force_no_cache
 
-        # Genera la query SQL con AI
-        sql_query, cache_used = generate_sql_query(request.domanda, db_schema, request.openai_api_key, use_cache)
+        # Convertiamo la configurazione LLM in un dizionario
+        llm_config = {
+            "provider": request.llm_config.provider,
+            "api_key": request.llm_config.api_key,
+            "model": request.llm_config.model
+        }
+
+        # Aggiungiamo secret_key se presente (per Baidu ERNIE)
+        if request.llm_config.secret_key:
+            llm_config["secret_key"] = request.llm_config.secret_key
+
+        # Genera la query SQL con AI, passando esplicitamente use_cache
+        sql_query, cache_used = generate_sql_query(request.domanda, db_schema, llm_config, use_cache)
         logger.info(f"📝 Query SQL generata dall'AI: {sql_query}")
 
+        if cache_used:
+            logger.info("✅ Query recuperata dalla cache")
+        else:
+            logger.info("📝 Query generata nuova")
+
         # Esegue la query e ottiene il risultato
-        risposta = process_query_results(engine, sql_query, request.domanda, request.openai_api_key)
+        risposta = process_query_results(engine, sql_query, request.domanda, llm_config)
         logger.info("✅ Query eseguita con successo!")
 
         # Chiude il tunnel SSH
@@ -148,12 +314,58 @@ def query_database(request: QueryRequest):
 
         risposta["query_sql"] = sql_query
         risposta["cache_used"] = cache_used
+        risposta["llm_provider"] = request.llm_config.provider
 
         return risposta
 
     except Exception as e:
         logger.error(f"❌ ERRORE: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Errore interno: {str(e)}")
+
+
+@app.get("/available_models")
+def get_available_models():
+    """
+    Restituisce l'elenco dei modelli disponibili per ciascun provider LLM.
+    """
+    return {
+        "openai": [
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "description": "Modello economico e veloce"},
+            {"id": "gpt-4o", "name": "GPT-4o", "description": "Modello più potente con supporto multimodale"},
+            {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "description": "Buon rapporto qualità-prezzo"}
+        ],
+        "claude": [
+            {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku", "description": "Modello veloce ed economico"},
+            {"id": "claude-3-sonnet-20240229", "name": "Claude 3 Sonnet", "description": "Bilanciato per performance e costo"},
+            {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus", "description": "Modello più potente"}
+        ],
+        "deepseek": [
+            {"id": "deepseek-chat", "name": "DeepSeek Chat", "description": "Modello di chat generale"},
+            {"id": "deepseek-coder", "name": "DeepSeek Coder", "description": "Specializzato per codice"}
+        ],
+        "ernie": [
+            {"id": "ernie-bot-4", "name": "ERNIE Bot 4", "description": "Modello avanzato di Baidu"},
+            {"id": "ernie-bot", "name": "ERNIE Bot", "description": "Modello di base"}
+        ]
+    }
+
+
+@app.get("/")
+def root():
+    """
+    Ritorna info basilari sull'API.
+    """
+    return {
+        "app": "Database Crawler AI",
+        "version": "2.0.0",
+        "features": [
+            "Multi LLM Support (OpenAI, Claude, DeepSeek, Baidu ERNIE)",
+            "Query SQL in linguaggio naturale",
+            "Cache intelligente delle query",
+            "Sistema di hint per interpretazione dati",
+            "Tunnel SSH per database remoti"
+        ]
+    }
 
 
 if __name__ == "__main__":

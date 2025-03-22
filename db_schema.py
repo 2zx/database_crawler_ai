@@ -1,7 +1,7 @@
 import json
 import os
 import logging
-from sqlalchemy import inspect   # type: ignore
+from sqlalchemy import inspect  # type: ignore
 import hashlib
 
 DB_SCHEMA_CACHE_PATH = "/app/db_schema.json"  # 🔥 Percorso del file di cache della struttura

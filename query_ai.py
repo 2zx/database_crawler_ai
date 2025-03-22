@@ -4,21 +4,23 @@ import pandas as pd  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import os
 from sqlalchemy.sql import text  # type: ignore
-from openai import OpenAI  # type: ignore
 from pandasai import SmartDataframe  # type: ignore
 from pandasai.llm.openai import OpenAI as OpenAILLM  # type: ignore
 from query_cache import get_cached_query, save_query_to_cache
+from hint_manager import format_hints_for_prompt
 import logging
+from llm_manager import get_llm_instance
 
 # Configura il logging per vedere gli errori nel container
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-AI_MODEL = "gpt-4o-mini"
 EXPORT_PATH = "exports/charts/"
 os.makedirs(EXPORT_PATH, exist_ok=True)
 
-OPENAI_CLIENT = None
+# Ora supportiamo diversi LLM
+LLM_INSTANCE = None
+DEFAULT_MAX_TOKENS = 1000
 
 
 def encode_figure_to_base64(fig):
@@ -31,13 +33,14 @@ def encode_figure_to_base64(fig):
     return base64.b64encode(img_bytes.read()).decode("utf-8")
 
 
-def generate_sql_query(domanda, db_schema, openai_api_key, use_cache=True):
+def generate_sql_query(domanda, db_schema, llm_config, use_cache=True):
     """
     Genera una query SQL basata sulla domanda dell'utente e sulla struttura del database.
 
     :param domanda: La domanda dell'utente in linguaggio naturale
     :param db_schema: Dizionario contenente la struttura del database (tabelle, colonne, chiavi esterne)
-    :param openai_api_key: La chiave API di OpenAI per la generazione della query
+    :param llm_config: Configurazione del LLM (provider, api_key, ecc.)
+    :param use_cache: Se True, controlla prima la cache
     :return: Una query SQL generata dall'AI
     """
 
@@ -48,12 +51,17 @@ def generate_sql_query(domanda, db_schema, openai_api_key, use_cache=True):
             logger.info(f"✅ Cache hit! Usata query SQL già salvata per '{domanda}'")
             return cached_query, True  # ✅ Usiamo la query salvata
 
+    # Otteniamo gli hint attivi formattati per il prompt
+    formatted_hints = format_hints_for_prompt()
+    hints_section = f"\n\n{formatted_hints}\n" if formatted_hints else ""
+
     prompt_sql = f"""
     Sei un esperto di database SQL. Ti verrà fornita la struttura di un database PostgreSQL,
-    e la domanda dell'utente. Devi restituire **solo** la query SQL necessaria per ottenere la risposta.
+    la domanda dell'utente, e alcune istruzioni sull'interpretazione dei dati.
+    Devi restituire **solo** la query SQL necessaria per ottenere la risposta.
 
     **Struttura del Database:**
-    {db_schema}
+    {db_schema}{hints_section}
 
     **Domanda dell'utente:**
     "{domanda}"
@@ -62,32 +70,31 @@ def generate_sql_query(domanda, db_schema, openai_api_key, use_cache=True):
     Verifica che la query sia sintatticamente corretta e coerente con la struttura del database e con la domanda dell'utente.
     Ricontrolla più volte in base allo schema DB per assicurarti che restituisca i risultati attesi.
     Non generare mai valori inventati.
+    Assicurati di seguire le istruzioni sull'interpretazione dei dati fornite.
     """
 
-    get_openai_client(openai_api_key)
+    provider = llm_config.get("provider", "openai")
 
     try:
-        response = OPENAI_CLIENT.chat.completions.create(
-            model=AI_MODEL,  # ✅ Usiamo gpt-4o-mini per generare query SQL
-            messages=[
-                {"role": "system", "content": "Sei un assistente SQL esperto."},
-                {"role": "user", "content": prompt_sql}
-            ]
-        )
+        # Ottieni l'istanza LLM appropriata
+        llm_instance = get_llm_instance(provider, llm_config)
 
-        sql_query = response.choices[0].message.content.strip()
+        # Genera la query SQL
+        sql_query = llm_instance.generate_query(prompt_sql)
 
         # ✅ 3️⃣ Salviamo la query nella cache con il suo embedding
-        save_query_to_cache(domanda, sql_query)
+        # Salviamo nella cache solo se use_cache è True
+        if use_cache:
+            save_query_to_cache(domanda, sql_query)
 
         return sql_query, False
 
     except Exception as e:
-        print(f"❌ Errore durante la generazione della query SQL: {e}")
+        logger.error(f"❌ Errore durante la generazione della query SQL con {provider}: {e}")
         return None, None
 
 
-def process_query_results(engine, sql_query, domanda, openai_api_key):
+def process_query_results(engine, sql_query, domanda, llm_config):
     """
     Esegue la query SQL generata dall'AI, analizza i dati e restituisce una risposta leggibile.
     """
@@ -119,23 +126,62 @@ def process_query_results(engine, sql_query, domanda, openai_api_key):
             except Exception:
                 pass  # Se fallisce, lasciamo la colonna invariata
 
-        # ✅ Configurazione OpenAI per PandasAI
-        llm = OpenAILLM(api_token=openai_api_key, model=AI_MODEL)
-        sdf = SmartDataframe(df, config={
-            "llm": llm,
-            "save_charts": False,
-            "custom_whitelisted_dependencies": ["pandas", "matplotlib", "numpy", "seaborn", "plotly"]
-        })
+        # Otteniamo gli hint attivi formattati per il prompt
+        formatted_hints = format_hints_for_prompt()
+        hints_section = f"\n\n{formatted_hints}\n" if formatted_hints else ""
 
-        # ✅ Chiediamo all'AI di spiegare i dati senza grafici
-        risposta = sdf.chat(f"""
+        # Selezioniamo il provider LLM appropriato
+        provider = llm_config.get("provider", "openai")
+        if provider == "openai":
+            # ✅ Configurazione OpenAI per PandasAI
+            llm = OpenAILLM(api_token=llm_config.get("api_key"), model=llm_config.get("model", "gpt-4o-mini"))
+            sdf = SmartDataframe(df, config={
+                "llm": llm,
+                "save_charts": False,
+                "custom_whitelisted_dependencies": ["pandas", "matplotlib", "numpy", "seaborn", "plotly"]
+            })
+
+            # ✅ Chiediamo all'AI di spiegare i dati senza grafici
+            prompt_analysis = f"""
+                **Domanda dell'utente**
+                "{domanda}"
+
+                {hints_section}
+
+                Sulla base della domanda e delle istruzioni sull'interpretazione dei dati,
+                descrivi i risultati in modo chiaro e utile nella lingua dell'utente senza grafici, solo testo.
+                Fai riferimento alle istruzioni sull'interpretazione dei dati quando opportuno.
+            """
+
+            risposta = sdf.chat(prompt_analysis)
+        else:
+            # Per gli altri provider, possiamo usare direttamente le nostre classi LLM
+            llm_instance = get_llm_instance(provider, llm_config)
+
+            # Prepariamo un prompt per l'analisi dei dati con hint
+            data_sample = df.head(10).to_string()
+            analysis_prompt = f"""
             **Domanda dell'utente**
             "{domanda}"
 
-            Sulla base della domanda descrivi i dati forniti in modo chiaro e utile
-            nella lingua dell'utente senza grafici, solo testo.""")
+            **Dati recuperati dal database (primi 10 record):**
+            {data_sample}
 
-        plot_code = generate_plot_code_with_gpt(df, openai_api_key)  # ✅ Generiamo il codice per il grafico
+            **Statistiche dei dati:**
+            {df.describe().to_string()}
+            {hints_section}
+
+            Sulla base della domanda, dei dati forniti e delle istruzioni sull'interpretazione dei dati,
+            descrivi in modo chiaro e utile i risultati.
+            Fornisci un'analisi che aiuti l'utente a comprendere i dati.
+            Rispondi nella lingua dell'utente senza proporre grafici, solo testo.
+            Fai riferimento alle istruzioni sull'interpretazione dei dati quando opportuno.
+            """
+
+            risposta = llm_instance.generate_analysis(analysis_prompt)
+
+        # ✅ Generiamo il codice per il grafico, includendo gli hint
+        plot_code = generate_plot_code_with_gpt(df, llm_config)
 
         if plot_code:
             path_grafico = execute_generated_plot_code(plot_code)  # ✅ Eseguiamo il codice per generare il grafico
@@ -147,7 +193,7 @@ def process_query_results(engine, sql_query, domanda, openai_api_key):
         }
 
     except Exception as e:
-
+        logger.error(f"❌ Errore nell'elaborazione dei dati: {str(e)}")
         return {
             "errore": f"❌ Errore nell'elaborazione dei dati: {str(e)}",
             "descrizione": "❌ Errore nell'analisi.",
@@ -156,45 +202,48 @@ def process_query_results(engine, sql_query, domanda, openai_api_key):
         }
 
 
-def generate_plot_code_with_gpt(df, openai_api_key):
+def generate_plot_code_with_gpt(df, llm_config):
     """
-    Chiede a OpenAI di generare codice Matplotlib basato sui dati.
+    Chiede all'AI di generare codice Matplotlib basato sui dati.
     """
+    # Otteniamo gli hint attivi formattati per il prompt
+    formatted_hints = format_hints_for_prompt()
+    hints_section = f"\n\n{formatted_hints}\n" if formatted_hints else ""
+
     prompt = f"""
     Genera un grafico Matplotlib per visualizzare i seguenti dati:
     {df.head().to_string()}
+
+    {hints_section}
 
     Il codice deve:
     - Usare plt.plot(), plt.bar() o plt.scatter() in base ai dati.
     - Aggiungere titolo, assi e griglia.
     - Salvare l'immagine in '{EXPORT_PATH}/generated_plot.png'.
     - Non mostrare il grafico (plt.show()).
+    - Tenere in considerazione le istruzioni per l'interpretazione dei dati.
 
     Ritorna SOLO il codice Python, senza commenti o altro.
     """
 
-    get_openai_client(openai_api_key)
+    provider = llm_config.get("provider", "openai")
 
-    response = OPENAI_CLIENT.chat.completions.create(
-        model=AI_MODEL,
-        messages=[{"role": "system", "content": "Sei un esperto di analisi dati."},
-                  {"role": "user", "content": prompt}]
-    )
+    try:
+        # Ottieni l'istanza LLM appropriata
+        llm_instance = get_llm_instance(provider, llm_config)
 
-    plot_code = response.choices[0].message.content.strip()
-    plot_code = clean_generated_code(plot_code)  # ✅ Rimuoviamo ```python e ```
+        # Genera il codice per il grafico
+        plot_code = llm_instance.generate_query(prompt)
+        plot_code = clean_generated_code(plot_code)  # ✅ Rimuoviamo ```python e ```
 
-    # ✅ Salviamo il codice in un file Python per debugging
-    with open(f"{EXPORT_PATH}/generated_plot.py", "w") as f:
-        f.write(plot_code)
+        # ✅ Salviamo il codice in un file Python per debugging
+        with open(f"{EXPORT_PATH}/generated_plot.py", "w") as f:
+            f.write(plot_code)
 
-    return plot_code
-
-
-def get_openai_client(openai_api_key):
-    global OPENAI_CLIENT
-    if not OPENAI_CLIENT:
-        OPENAI_CLIENT = OpenAI(api_key=openai_api_key)
+        return plot_code
+    except Exception as e:
+        logger.error(f"❌ Errore nella generazione del codice del grafico: {str(e)}")
+        return None
 
 
 def clean_generated_code(code):
@@ -216,7 +265,7 @@ def clean_generated_code(code):
 
 def execute_generated_plot_code(plot_code):
     """
-    Esegue il codice Matplotlib generato da OpenAI in un ambiente sicuro.
+    Esegue il codice Matplotlib generato dall'AI in un ambiente sicuro.
     """
     try:
         logger.info("📊 Esecuzione del codice generato per il grafico")

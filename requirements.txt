@@ -6,7 +6,9 @@ psycopg2
 pandas==1.5.3
 numpy==1.23.5
 pandasai
-openai
+openai>=1.0.0
+anthropic>=0.7.0
+httpx
 streamlit==1.22.0
 requests
 paramiko
@@ -15,4 +17,4 @@ matplotlib
 sentence-transformers
 faiss-cpu
 xlsxwriter
-dotenv
+python-dotenv
