@@ -27,11 +27,19 @@ def get_db_schema(engine, force_refresh=False):
     schema_info = {}
 
     for table_name in inspector.get_table_names():
-        if table_name.startswith("wizard_") or table_name.startswith("ir_"):
-            continue  # Ignora le tabelle temporanee
 
-        if not table_name.startswith("product") and not table_name.startswith("sale") and "invoice" not in table_name:
-            continue
+        ignore_prefixes = [
+            "base_",
+            "mail_",
+            "wizard_",
+            "ir_",
+            "report_",
+            "wkf"
+        ]
+
+        for prefix in ignore_prefixes:
+            if table_name.startswith(prefix):
+                continue  # Ignora le tabelle temporanee
 
         logger.info(f"📊 Ispeziono tabella {table_name}")
         columns = inspector.get_columns(table_name)

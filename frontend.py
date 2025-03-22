@@ -473,12 +473,18 @@ class UserInterface:
         # Creiamo i tabs per le diverse sezioni
         tab1, tab2 = st.tabs(["📊 Analisi Dati", "✏️ Hint Interpretazione"])
 
+        # Inizializza il valore di ritorno
+        action_data = {"action": None}
+
+        # Renderizza i contenuti in entrambe le tab
         with tab1:
-            return self.render_analysis_tab()
+            action_data = self.render_analysis_tab()
 
         with tab2:
             self.render_hints_tab()
-            return {"action": None}
+
+        # Ritorna il valore solo alla fine, dopo aver renderizzato entrambe le tab
+        return action_data
 
     def render_analysis_tab(self):
         """Visualizza la tab di analisi dati."""
@@ -529,96 +535,107 @@ class UserInterface:
 
     def render_hints_tab(self):
         """Visualizza la tab di gestione degli hint."""
+        # Problema identificato: questa funzione viene chiamata, ma non mostra correttamente i contenuti
+
+        # Assicuriamoci che il contenuto sia visibile
         st.header("✏️ Hint per l'interpretazione dei dati")
 
-        st.markdown("""
-        Gli hint aiutano l'AI a interpretare correttamente i dati. Puoi aggiungere istruzioni specifiche
-        su come interpretare tabelle, colonne o relazioni nel database.
+        # Aggiungiamo un container per garantire che il contenuto sia visibile
+        hint_container = st.container()
 
-        Ad esempio:
-        - "I valori nella colonna 'stato_ordine' rappresentano il ciclo di vita dell'ordine"
-        - "La tabella 'clienti' contiene sia aziende che persone fisiche"
-        - "Le date sono in formato ISO e nel fuso orario UTC+1"
-        """)
+        with hint_container:
+            st.markdown("""
+            Gli hint aiutano l'AI a interpretare correttamente i dati. Puoi aggiungere istruzioni specifiche
+            su come interpretare tabelle, colonne o relazioni nel database.
 
-        # Sezione per aggiungere un nuovo hint
-        st.subheader("Aggiungi nuovo hint")
+            Ad esempio:
+            - "I valori nella colonna 'stato_ordine' rappresentano il ciclo di vita dell'ordine"
+            - "La tabella 'clienti' contiene sia aziende che persone fisiche"
+            - "Le date sono in formato ISO e nel fuso orario UTC+1"
+            """)
 
-        with st.form("add_hint_form"):
-            hint_text = st.text_area("Testo dell'hint")
+            # Sezione per aggiungere un nuovo hint
+            st.subheader("Aggiungi nuovo hint")
 
-            # Ottieni le categorie dal backend
-            hint_categories = self.hint_manager.get_hint_categories()
-            hint_category = st.selectbox("Categoria", hint_categories)
+            with st.form(key="add_hint_form"):
+                hint_text = st.text_area("Testo dell'hint", key="hint_text_input")
 
-            submit_button = st.form_submit_button("✅ Aggiungi hint")
+                # Ottieni le categorie dal backend
+                hint_categories = self.hint_manager.get_hint_categories()
+                hint_category = st.selectbox("Categoria", hint_categories, key="hint_category_select")
 
-            if submit_button and hint_text:
-                hint_id = self.hint_manager.add_hint(hint_text, hint_category)
-                if hint_id:
-                    st.success(f"✅ Hint aggiunto con successo (ID: {hint_id})")
-                    st.experimental_rerun()
-                else:
-                    st.error("❌ Errore nell'aggiunta dell'hint")
+                submit_button = st.form_submit_button("✅ Aggiungi hint")
 
-        # Tabella per visualizzare e gestire gli hint esistenti
-        st.subheader("Hint esistenti")
-        hints = self.hint_manager.get_all_hints()
+                if submit_button and hint_text:
+                    hint_id = self.hint_manager.add_hint(hint_text, hint_category)
+                    if hint_id:
+                        st.success(f"✅ Hint aggiunto con successo (ID: {hint_id})")
+                        st.experimental_rerun()
+                    else:
+                        st.error("❌ Errore nell'aggiunta dell'hint")
 
-        if not hints:
-            st.info("Nessun hint presente. Aggiungi il primo hint per aiutare l'AI a interpretare i dati.")
-        else:
-            # Crea un dataframe per visualizzare gli hint
-            df_hints = pd.DataFrame(hints)
-            df_hints['status'] = df_hints['active'].apply(lambda x: "✅ Attivo" if x else "❌ Disattivato")
-            df_hints = df_hints[['id', 'hint_category', 'hint_text', 'status']]
-            df_hints.columns = ['ID', 'Categoria', 'Testo', 'Stato']
+            # Tabella per visualizzare e gestire gli hint esistenti
+            st.subheader("Hint esistenti")
+            hints = self.hint_manager.get_all_hints()
 
-            st.dataframe(df_hints)
+            if not hints:
+                st.info("Nessun hint presente. Aggiungi il primo hint per aiutare l'AI a interpretare i dati.")
+            else:
+                # Crea un dataframe per visualizzare gli hint
+                df_hints = pd.DataFrame(hints)
+                df_hints['status'] = df_hints['active'].apply(lambda x: "✅ Attivo" if x else "❌ Disattivato")
+                df_hints = df_hints[['id', 'hint_category', 'hint_text', 'status']]
+                df_hints.columns = ['ID', 'Categoria', 'Testo', 'Stato']
 
-            # Form per modificare o eliminare un hint
-            with st.form("edit_hint_form"):
-                col1, col2 = st.columns([1, 3])
+                st.dataframe(df_hints)
 
-                with col1:
-                    hint_id_to_edit = st.number_input("ID Hint", min_value=1, step=1)
+                # Form per modificare o eliminare un hint
+                st.subheader("Gestione degli hint esistenti")
 
-                with col2:
-                    action = st.radio("Azione", ["Modifica", "Attiva/Disattiva", "Elimina"])
+                with st.form(key="edit_hint_form"):
+                    col1, col2 = st.columns([1, 3])
 
-                if action == "Modifica":
-                    # Campi per la modifica
-                    new_hint_text = st.text_area("Nuovo testo")
-                    new_hint_category = st.selectbox("Nuova categoria", hint_categories)
+                    with col1:
+                        # Utilizziamo key esplicite per evitare conflitti
+                        hint_id_to_edit = st.number_input("ID Hint", min_value=1, step=1, key="hint_id_edit")
 
-                    update_button = st.form_submit_button("📝 Aggiorna hint")
+                    with col2:
+                        action = st.radio("Azione", ["Modifica", "Attiva/Disattiva", "Elimina"], key="hint_action")
 
-                    if update_button:
-                        if self.hint_manager.update_hint(hint_id_to_edit, new_hint_text, new_hint_category):
-                            st.success(f"✅ Hint {hint_id_to_edit} aggiornato con successo!")
-                            st.experimental_rerun()
-                        else:
-                            st.error(f"❌ Errore nell'aggiornamento dell'hint {hint_id_to_edit}")
+                    # Mostriamo campi differenti in base all'azione selezionata
+                    if action == "Modifica":
+                        new_hint_text = st.text_area("Nuovo testo", key="new_hint_text")
+                        new_hint_category = st.selectbox("Nuova categoria", hint_categories, key="new_hint_category")
 
-                elif action == "Attiva/Disattiva":
-                    toggle_button = st.form_submit_button("🔄 Attiva/Disattiva hint")
+                        update_button = st.form_submit_button("📝 Aggiorna hint")
 
-                    if toggle_button:
-                        if self.hint_manager.toggle_hint_status(hint_id_to_edit):
-                            st.success(f"✅ Stato dell'hint {hint_id_to_edit} modificato con successo!")
-                            st.experimental_rerun()
-                        else:
-                            st.error(f"❌ Errore nella modifica dello stato dell'hint {hint_id_to_edit}")
+                        if update_button:
+                            if self.hint_manager.update_hint(hint_id_to_edit, new_hint_text, new_hint_category):
+                                st.success(f"✅ Hint {hint_id_to_edit} aggiornato con successo!")
+                                st.experimental_rerun()
+                            else:
+                                st.error(f"❌ Errore nell'aggiornamento dell'hint {hint_id_to_edit}")
 
-                elif action == "Elimina":
-                    delete_button = st.form_submit_button("🗑️ Elimina hint")
+                    elif action == "Attiva/Disattiva":
+                        toggle_button = st.form_submit_button("🔄 Attiva/Disattiva hint")
 
-                    if delete_button:
-                        if self.hint_manager.delete_hint(hint_id_to_edit):
-                            st.success(f"✅ Hint {hint_id_to_edit} eliminato con successo!")
-                            st.experimental_rerun()
-                        else:
-                            st.error(f"❌ Errore nell'eliminazione dell'hint {hint_id_to_edit}")
+                        if toggle_button:
+                            if self.hint_manager.toggle_hint_status(hint_id_to_edit):
+                                st.success(f"✅ Stato dell'hint {hint_id_to_edit} modificato con successo!")
+                                st.experimental_rerun()
+                            else:
+                                st.error(f"❌ Errore nella modifica dello stato dell'hint {hint_id_to_edit}")
+
+                    elif action == "Elimina":
+                        st.warning("⚠️ Questa operazione eliminerà definitivamente l'hint selezionato.")
+                        delete_button = st.form_submit_button("🗑️ Elimina hint")
+
+                        if delete_button:
+                            if self.hint_manager.delete_hint(hint_id_to_edit):
+                                st.success(f"✅ Hint {hint_id_to_edit} eliminato con successo!")
+                                st.experimental_rerun()
+                            else:
+                                st.error(f"❌ Errore nell'eliminazione dell'hint {hint_id_to_edit}")
 
 
 class BackendClient:
