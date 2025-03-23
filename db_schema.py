@@ -79,13 +79,15 @@ def get_db_schema(engine, force_refresh=False):
         schema_info[table_name] = {
             "cols": {
                 col["name"]: {
-                    "type": str(col["type"]),  # ✅ Salviamo il tipo di dato
+                    #  "type": str(col["type"]),  # ✅ Salviamo il tipo di dato
                     "comment": col.get("comment", "")  # ✅ Recuperiamo i commenti
                 }
                 for col in columns if col["name"] not in ignore_columns
             },
             "fk": {
-                fk["constrained_columns"][0]: fk["referred_table"] for fk in foreign_keys if fk["constrained_columns"][0] not in ignore_columns
+                fk["constrained_columns"][0]: fk["referred_table"]
+                for fk in foreign_keys
+                if fk["constrained_columns"][0] not in ignore_columns
             },
             #  "indexes": {idx["name"]: idx["column_names"] for idx in indexes if idx["name"] not in ignore_columns}  # ✅ indici
         }

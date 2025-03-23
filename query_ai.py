@@ -34,23 +34,15 @@ def encode_figure_to_base64(fig):
     return base64.b64encode(img_bytes.read()).decode("utf-8")
 
 
-def generate_sql_query(domanda, db_schema, llm_config, use_cache=True):
+def generate_sql_query(domanda, db_schema, llm_config):
     """
     Genera una query SQL basata sulla domanda dell'utente e sulla struttura del database.
 
     :param domanda: La domanda dell'utente in linguaggio naturale
     :param db_schema: Dizionario contenente la struttura del database (tabelle, colonne, chiavi esterne)
     :param llm_config: Configurazione del LLM (provider, api_key, ecc.)
-    :param use_cache: Se True, controlla prima la cache
     :return: Una query SQL generata dall'AI
     """
-
-    # ✅ 1️⃣ Controlliamo la cache intelligente
-    if use_cache:
-        cached_query = get_cached_query(domanda)
-        if cached_query:
-            logger.info(f"✅ Cache hit! Usata query SQL già salvata per '{domanda}'")
-            return cached_query, True  # ✅ Usiamo la query salvata
 
     # Otteniamo gli hint attivi formattati per il prompt
     formatted_hints = format_hints_for_prompt()
@@ -72,9 +64,7 @@ def generate_sql_query(domanda, db_schema, llm_config, use_cache=True):
 
     Genera **solo** la query SQL senza alcuna spiegazione o testo aggiuntivo.
     Verifica che la query sia sintatticamente corretta e coerente con la struttura del database e con la domanda dell'utente.
-    Ricontrolla più volte in base allo schema DB per assicurarti che restituisca i risultati attesi.
     Non generare mai valori inventati.
-    Assicurati di seguire le istruzioni sull'interpretazione dei dati fornite.
     """
 
     provider = llm_config.get("provider", "openai")
@@ -86,19 +76,14 @@ def generate_sql_query(domanda, db_schema, llm_config, use_cache=True):
         # Genera la query SQL
         sql_query = llm_instance.generate_query(prompt_sql)
 
-        # ✅ 3️⃣ Salviamo la query nella cache con il suo embedding
-        # Salviamo nella cache solo se use_cache è True
-        if use_cache:
-            save_query_to_cache(domanda, sql_query)
-
-        return sql_query, False
+        return sql_query
 
     except Exception as e:
         logger.error(f"❌ Errore durante la generazione della query SQL con {provider}: {e}")
-        return None, None
+        return None
 
 
-def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine, max_attempts=3):
+def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine, max_attempts=3, progress_callback=None):
     """
     Esegue una query SQL generata dall'AI con sistema di retry in caso di errori sintattici.
 
@@ -106,22 +91,89 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
         domanda (str): La domanda dell'utente in linguaggio naturale
         db_schema (dict): Struttura del database
         llm_config (dict): Configurazione del modello LLM
+        use_cache (bool): Se True, controlla prima la cache
         engine: Connessione al database SQLAlchemy
         max_attempts (int): Numero massimo di tentativi
+        progress_callback (func): Funzione per aggiornare il progresso
 
     Returns:
-        tuple: (risultato, query_sql, tentativi_effettuati)
-            - risultato: DataFrame con i risultati o None in caso di fallimento
+        tuple: (query_sql, cache_used, tentativi_effettuati)
             - query_sql: L'ultima query SQL tentata
+            - cache_used: Indica se la query è stata recuperata dalla cache
             - tentativi_effettuati: Numero di tentativi effettuati
     """
 
     attempts = 0
     error_history = []
     query_sql = None
+    cache_used = False
+
+    # Funzione per aggiornare il progresso
+    def update_progress(status, message, step, progress):
+        if progress_callback:
+            progress_callback(status, message, step, progress)
+
+    # Prima controlliamo la cache se use_cache è True
+    if use_cache:
+        update_progress(
+            "checking_cache",
+            "Ricerca nella cache query simili...",
+            "check_cache",
+            30
+        )
+
+        cached_query = get_cached_query(domanda)
+        if cached_query:
+            update_progress(
+                "cache_hit",
+                "Trovata query simile in cache!",
+                "cache_hit",
+                40
+            )
+
+            # Verifica che la query sia valida provando a eseguirla
+            try:
+                with engine.connect() as connection:
+                    # Utilizziamo EXPLAIN per verificare la validità della query senza eseguirla completamente
+                    connection.execute(text("explain " + cached_query))
+
+                update_progress(
+                    "cache_valid",
+                    "Query dalla cache verificata e valida",
+                    "cache_valid",
+                    45
+                )
+
+                logger.info(f"✅ Cache hit! Usata query SQL già salvata per '{domanda}'")
+                return cached_query, True, 0
+            except SQLAlchemyError as e:
+                update_progress(
+                    "cache_invalid",
+                    f"Query dalla cache non valida: {str(e)}",
+                    "cache_invalid",
+                    35
+                )
+
+                # La query dalla cache non è valida, proseguiamo con la generazione
+                logger.info(f"⚠️ Query dalla cache non valida, procedo con generazione: {str(e)}")
+                # Elimina la query non valida dalla cache
+                delete_cached_query(domanda)
+
+    # Base progresso: ogni tentativo vale circa il 10% del totale (40-70%)
+    progress_base = 40
+    progress_per_attempt = 10
 
     while attempts < max_attempts:
         attempts += 1
+        current_progress = progress_base + (attempts - 1) * progress_per_attempt
+
+        # Notifica l'inizio di un nuovo tentativo
+        update_progress(
+            "generating",
+            f"Tentativo {attempts}/{max_attempts} di generare SQL...",
+            "generate_sql",
+            current_progress
+        )
 
         # Genera la query, includendo eventuali errori precedenti nel prompt
         error_context = ""
@@ -134,11 +186,18 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
         query_prompt = domanda + error_context
 
         # Genera la query SQL
-        query_sql, cache_used = generate_sql_query(query_prompt, db_schema, llm_config, use_cache)
+        query_sql = generate_sql_query(query_prompt, db_schema, llm_config)
 
         # Se non è stata generata una query valida, continua
         if not query_sql:
-            error_history.append("La generazione della query è fallita.")
+            error_msg = "La generazione della query è fallita."
+            error_history.append(error_msg)
+            update_progress(
+                "error",
+                f"Errore: {error_msg}",
+                "generate_sql_failed",
+                current_progress
+            )
             continue
 
         # Pulisci il formato della query se necessario
@@ -146,18 +205,46 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
 
         print(f"✅ Query ripulita: {query_sql}")
 
+        # Notifica che stiamo per eseguire la query
+        update_progress(
+            "executing",
+            f"Esecuzione query (tentativo {attempts}/{max_attempts})...",
+            "execute_sql",
+            current_progress + progress_per_attempt / 2
+        )
+
         try:
             # Prova a eseguire la query
             with engine.connect() as connection:
                 start_time = time.time()
-                result = pd.read_sql(text("explain " + query_sql), connection)
+                pd.read_sql(text("explain " + query_sql), connection)
                 execution_time = time.time() - start_time
 
-                print(f"✅ Query eseguita con successo al tentativo {attempts}/{max_attempts}")
+                print(f"✅ Anteprima query (explain) eseguita con successo al tentativo {attempts}/{max_attempts}")
                 print(f"⏱️ Tempo di esecuzione: {execution_time:.2f} secondi")
 
+                # Notifica successo
+                update_progress(
+                    "success",
+                    f"Query validata con successo in {execution_time:.2f} secondi!",
+                    "execute_sql_success",
+                    progress_base + progress_per_attempt
+                )
+
+                # Se non è dalla cache, salviamo la query
+                if use_cache and not cache_used:
+                    update_progress(
+                        "saving_to_cache",
+                        "Salvataggio query nella cache...",
+                        "save_to_cache",
+                        progress_base + progress_per_attempt + 5
+                    )
+
+                    # Salviamo nella cache solo se use_cache è True
+                    save_query_to_cache(domanda, query_sql)
+
                 # La query è stata eseguita con successo
-                return query_sql, cache_used, attempts
+                return query_sql, False, attempts
 
         except SQLAlchemyError as e:
             # Salva l'errore per il prossimo tentativo
@@ -166,15 +253,30 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
 
             print(f"❌ Tentativo {attempts}/{max_attempts} fallito con errore: {error_message}")
 
+            # Notifica errore
+            update_progress(
+                "retry",
+                f"Errore SQL: {error_message}",
+                "execute_sql_failed",
+                current_progress + progress_per_attempt / 2
+            )
+
             # Se questo era l'ultimo tentativo, restituisci None
             if attempts >= max_attempts:
                 print(f"⚠️ Numero massimo di tentativi ({max_attempts}) raggiunto. Impossibile eseguire la query.")
 
                 delete_cached_query(domanda)  # Elimina la query dalla cache
-                return query_sql, cache_used, attempts
+
+                update_progress(
+                    "failed",
+                    f"Fallimento dopo {max_attempts} tentativi",
+                    "max_attempts_reached",
+                    70
+                )
+                return query_sql, False, attempts
 
     # Non dovremmo mai arrivare qui, ma per sicurezza
-    return query_sql, cache_used, attempts
+    return query_sql, False, attempts
 
 
 def clean_query(query_sql):
@@ -202,7 +304,7 @@ def clean_query(query_sql):
                 inside_code_block = not inside_code_block
                 continue
 
-            if inside_code_block or not "```" in query_sql:
+            if inside_code_block or "```" not in query_sql:
                 cleaned_lines.append(line)
 
         query_sql = "\n".join(cleaned_lines)
