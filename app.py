@@ -6,7 +6,7 @@ import paramiko  # type: ignore
 from sqlalchemy import create_engine  # type: ignore
 import traceback
 import io
-from query_ai import generate_sql_query, process_query_results
+from query_ai import generate_query_with_retry, process_query_results
 from db_schema import get_db_schema
 import logging
 from database import create_db
@@ -296,8 +296,8 @@ def query_database(request: QueryRequest):
             llm_config["secret_key"] = request.llm_config.secret_key
 
         # Genera la query SQL con AI, passando esplicitamente use_cache
-        sql_query, cache_used = generate_sql_query(request.domanda, db_schema, llm_config, use_cache)
-        logger.info(f"📝 Query SQL generata dall'AI: {sql_query}")
+        sql_query, cache_used, attempts = generate_query_with_retry(request.domanda, db_schema, llm_config, use_cache, engine)
+        logger.info(f"📝 Query SQL generata dall'AI dopo {attempts} tentativi: {sql_query}")
 
         if cache_used:
             logger.info("✅ Query recuperata dalla cache")

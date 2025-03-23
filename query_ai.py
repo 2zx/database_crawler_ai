@@ -4,10 +4,12 @@ import math
 import pandas as pd  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import os
+import time
 from sqlalchemy.sql import text  # type: ignore
+from sqlalchemy.exc import SQLAlchemyError  # type: ignore
 from pandasai import SmartDataframe  # type: ignore
 from pandasai.llm.openai import OpenAI as OpenAILLM  # type: ignore
-from query_cache import get_cached_query, save_query_to_cache
+from query_cache import get_cached_query, save_query_to_cache, delete_cached_query
 from hint_manager import format_hints_for_prompt
 import logging
 from llm_manager import get_llm_instance
@@ -56,7 +58,10 @@ def generate_sql_query(domanda, db_schema, llm_config, use_cache=True):
 
     prompt_sql = f"""
     Sei un esperto di database SQL. Ti verrà fornita la struttura di un database PostgreSQL,
-    la domanda dell'utente, e alcune istruzioni sull'interpretazione dei dati.
+    comprensivo di tabelle, colonne, chiavi primarie e straniere, indici e commenti.
+    I commenti sono utili per capire il senso della colonna e il tipo di dati che contiene e come il devi interpretare.
+    Riceverai una domanda posta da un utente in linguaggio naturale.
+    Dovrai generare una query SQL che risponda alla domanda dell'utente.
     Devi restituire **solo** la query SQL necessaria per ottenere la risposta.
 
     **Struttura del Database:**
@@ -93,21 +98,128 @@ def generate_sql_query(domanda, db_schema, llm_config, use_cache=True):
         return None, None
 
 
+def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine, max_attempts=3):
+    """
+    Esegue una query SQL generata dall'AI con sistema di retry in caso di errori sintattici.
+
+    Args:
+        domanda (str): La domanda dell'utente in linguaggio naturale
+        db_schema (dict): Struttura del database
+        llm_config (dict): Configurazione del modello LLM
+        engine: Connessione al database SQLAlchemy
+        max_attempts (int): Numero massimo di tentativi
+
+    Returns:
+        tuple: (risultato, query_sql, tentativi_effettuati)
+            - risultato: DataFrame con i risultati o None in caso di fallimento
+            - query_sql: L'ultima query SQL tentata
+            - tentativi_effettuati: Numero di tentativi effettuati
+    """
+
+    attempts = 0
+    error_history = []
+    query_sql = None
+
+    while attempts < max_attempts:
+        attempts += 1
+
+        # Genera la query, includendo eventuali errori precedenti nel prompt
+        error_context = ""
+        if error_history:
+            error_context = "\n\nLa query precedente ha generato il seguente errore: " + \
+                f"\n{error_history[-1]}\n" + \
+                "Correggi l'errore sintattico e genera una query SQL valida."
+
+        # Combina domanda originale ed errori
+        query_prompt = domanda + error_context
+
+        # Genera la query SQL
+        query_sql, cache_used = generate_sql_query(query_prompt, db_schema, llm_config, use_cache)
+
+        # Se non è stata generata una query valida, continua
+        if not query_sql:
+            error_history.append("La generazione della query è fallita.")
+            continue
+
+        # Pulisci il formato della query se necessario
+        query_sql = clean_query(query_sql)
+
+        print(f"✅ Query ripulita: {query_sql}")
+
+        try:
+            # Prova a eseguire la query
+            with engine.connect() as connection:
+                start_time = time.time()
+                result = pd.read_sql(text("explain " + query_sql), connection)
+                execution_time = time.time() - start_time
+
+                print(f"✅ Query eseguita con successo al tentativo {attempts}/{max_attempts}")
+                print(f"⏱️ Tempo di esecuzione: {execution_time:.2f} secondi")
+
+                # La query è stata eseguita con successo
+                return query_sql, cache_used, attempts
+
+        except SQLAlchemyError as e:
+            # Salva l'errore per il prossimo tentativo
+            error_message = str(e)
+            error_history.append(error_message)
+
+            print(f"❌ Tentativo {attempts}/{max_attempts} fallito con errore: {error_message}")
+
+            # Se questo era l'ultimo tentativo, restituisci None
+            if attempts >= max_attempts:
+                print(f"⚠️ Numero massimo di tentativi ({max_attempts}) raggiunto. Impossibile eseguire la query.")
+
+                delete_cached_query(domanda)  # Elimina la query dalla cache
+                return query_sql, cache_used, attempts
+
+    # Non dovremmo mai arrivare qui, ma per sicurezza
+    return query_sql, cache_used, attempts
+
+
+def clean_query(query_sql):
+    """
+    Pulisce la query SQL rimuovendo eventuali markdown o formattazioni aggiuntive.
+
+    Args:
+        query_sql (str): La query SQL potenzialmente con formattazione
+
+    Returns:
+        str: La query SQL pulita
+    """
+    if not query_sql:
+        return ""
+
+    # Rimuovi i blocchi di codice markdown
+    if "```" in query_sql:
+        # Estrai la query dal blocco di codice
+        lines = query_sql.split("\n")
+        cleaned_lines = []
+        inside_code_block = False
+
+        for line in lines:
+            if line.strip().startswith("```"):
+                inside_code_block = not inside_code_block
+                continue
+
+            if inside_code_block or not "```" in query_sql:
+                cleaned_lines.append(line)
+
+        query_sql = "\n".join(cleaned_lines)
+
+    # Rimuovi eventuali prefissi "sql" all'inizio della query
+    query_sql = query_sql.strip()
+    if query_sql.lower().startswith("sql"):
+        query_sql = query_sql[3:].strip()
+
+    return query_sql
+
+
 def process_query_results(engine, sql_query, domanda, llm_config):
     """
     Esegue la query SQL generata dall'AI, analizza i dati e restituisce una risposta leggibile.
     """
     try:
-        # rimuovo prefisso SQL se presente
-        if "```" in sql_query:
-            sql_query = sql_query.split("```")[1].strip()
-        if sql_query.lower().startswith("sql"):
-            sql_query = sql_query[3:].strip()
-
-        # Verifica se la query è valida
-        if not sql_query.lower().startswith("select"):
-            logger.error(f"❌ Query non valida generata: {sql_query}")
-            raise Exception("L'AI ha generato una query non valida.")
 
         # ✅ Connessione corretta con SQLAlchemy 2.0
         with engine.connect() as connection:
