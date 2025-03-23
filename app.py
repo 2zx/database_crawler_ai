@@ -1,5 +1,5 @@
 import uvicorn  # type: ignore
-from fastapi import FastAPI, HTTPException  # type: ignore
+from fastapi import FastAPI, HTTPException, BackgroundTasks  # type: ignore
 from pydantic import BaseModel  # type: ignore
 from sshtunnel import SSHTunnelForwarder  # type: ignore
 import paramiko  # type: ignore
@@ -18,7 +18,6 @@ from hint_manager import (
 )
 from typing import Optional
 import uuid
-from fastapi import BackgroundTasks  # type: ignore
 
 # Configura il logging per vedere gli errori nel container
 logging.basicConfig(level=logging.INFO)

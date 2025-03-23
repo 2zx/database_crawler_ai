@@ -5,11 +5,18 @@ sistema di hint per l'interpretazione dei dati e supporto per diversi provider L
 """
 import os
 import json
+import time
 import pandas as pd   # type: ignore
 import streamlit as st   # type: ignore
 import requests   # type: ignore
 from io import BytesIO
 from dotenv import load_dotenv   # type: ignore
+import logging
+
+
+# Configura il logging per vedere gli errori nel container
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Carica variabili d'ambiente
 load_dotenv()
@@ -518,7 +525,7 @@ class UserInterface:
         if "refresh_clicked" not in st.session_state:
             st.session_state.refresh_clicked = False
 
-        # Aggiungiamo variabili di stato per la query in corso
+        # Inizializzazione delle variabili di stato per la query in corso
         if "query_in_progress" not in st.session_state:
             st.session_state.query_in_progress = False
         if "query_id" not in st.session_state:
@@ -527,6 +534,8 @@ class UserInterface:
             st.session_state.query_status = {}
         if "last_update_time" not in st.session_state:
             st.session_state.last_update_time = 0
+        if "polling_active" not in st.session_state:
+            st.session_state.polling_active = False
 
         # Pulsanti per le azioni
         col1, col2 = st.columns([1, 1])
@@ -547,19 +556,32 @@ class UserInterface:
             if refresh_button:
                 st.session_state.refresh_clicked = True
 
+        # Visualizza container di debug (commentato per produzione)
+        # debug_container = st.container()
+        # with debug_container:
+        #     st.write("Debug - query_in_progress:", st.session_state.query_in_progress)
+        #     st.write("Debug - query_id:", st.session_state.query_id)
+        #     st.write("Debug - polling_active:", st.session_state.polling_active)
+        #     st.write("Debug - last_update_time:", st.session_state.last_update_time)
+
+        # Contenitore per il progresso
+        progress_container = st.container()
+
         # Mostra il progresso se una query è in corso
-        if st.session_state.query_in_progress:
-            # Creiamo un contenitore principale per il progresso
-            progress_container = st.container()
+        if st.session_state.query_in_progress and st.session_state.query_id:
+
+            logger.info(f"🔄 Polling per query ID: {st.session_state.query_id}")
 
             with progress_container:
+                logger.info("🔄 Mostra progresso")
+
                 st.markdown("### 🔄 Elaborazione in corso")
 
                 # Container per gli aggiornamenti di stato
                 status_container = st.empty()
                 progress_bar = st.progress(0)
 
-                # Icone per i vari stati
+                # Dizionari per le icone e le descrizioni
                 status_icons = {
                     "starting": "🚀",
                     "connecting": "🔌",
@@ -580,7 +602,6 @@ class UserInterface:
                     "saving_to_cache": "💾"
                 }
 
-                # Descrizioni più dettagliate dei passaggi
                 step_descriptions = {
                     "init": "Inizializzazione",
                     "ssh_tunnel": "Connessione SSH",
@@ -603,100 +624,118 @@ class UserInterface:
                     "error": "Errore"
                 }
 
-                # Recupera periodicamente lo stato
-                if st.session_state.query_id:
+                current_time = time.time()
+
+                # Verifica se è il momento di eseguire un aggiornamento
+                # Limita la frequenza a una volta ogni 0.5 secondi
+                if (current_time - st.session_state.last_update_time > 0.5) or not st.session_state.polling_active:
+                    st.session_state.last_update_time = current_time
+                    st.session_state.polling_active = True
+
+                    logger.info("🔄 Polling attivo")
+
                     try:
-                        import time
-                        current_time = time.time()
+                        # Richiedi lo stato dal backend
+                        response = requests.get(
+                            f"{BACKEND_URL}/query_status/{st.session_state.query_id}"
+                        )
 
-                        # Limita la frequenza degli aggiornamenti (max 2 al secondo)
-                        if current_time - st.session_state.last_update_time > 0.5:
-                            st.session_state.last_update_time = current_time
+                        if response.status_code == 200:
+                            status_data = response.json()
+                            st.session_state.query_status = status_data
 
-                            # Effettua la richiesta di stato
-                            response = requests.get(
-                                f"{BACKEND_URL}/query_status/{st.session_state.query_id}"
-                            )
+                            # Aggiorna la progress bar
+                            progress = status_data.get("progress", 0)
+                            progress_bar.progress(progress / 100)
 
-                            if response.status_code == 200:
-                                status_data = response.json()
-                                st.session_state.query_status = status_data
+                            # Aggiorna il messaggio di stato
+                            status_message = status_data.get("message", "Elaborazione in corso...")
+                            current_step = status_data.get("step", "")
+                            current_status = status_data.get("status", "")
 
-                                # Aggiorna la progress bar
-                                progress = status_data.get("progress", 0)
-                                progress_bar.progress(progress / 100)
+                            # Ottieni icona e descrizione
+                            icon = status_icons.get(current_status, "🔄")
+                            step_desc = step_descriptions.get(current_step, current_step.replace("_", " ").title())
 
-                                # Aggiorna il messaggio di stato
-                                status_message = status_data.get("message", "Elaborazione in corso...")
-                                current_step = status_data.get("step", "")
-                                current_status = status_data.get("status", "")
+                            # Gestione tentativo corrente
+                            attempts_info = ""
+                            if "attempts" in status_data and status_data["attempts"] > 0:
+                                attempts_info = f" (Tentativo {status_data['attempts']})"
 
-                                # Ottieni icona e descrizione
-                                icon = status_icons.get(current_status, "🔄")
-                                step_desc = step_descriptions.get(current_step, current_step.replace("_", " ").title())
+                            # Mostra lo stato corrente
+                            status_container.info(f"{icon} **{step_desc}**{attempts_info}: {status_message}")
 
-                                # Mostra il numero di tentativi se disponibile
-                                attempts_info = ""
-                                if "attempts" in status_data and status_data["attempts"] > 0:
-                                    attempts_info = f" (Tentativo {status_data['attempts']})"
+                            # Gestione completamento o errore
+                            if current_status in ["completed", "failed", "error"]:
+                                st.session_state.query_in_progress = False
+                                st.session_state.polling_active = False
 
-                                # Formatta il messaggio di stato
-                                status_container.info(f"{icon} **{step_desc}**{attempts_info}: {status_message}")
+                                if current_status == "completed" and "result" in status_data:
+                                    # Mostra i risultati
+                                    result_data = status_data["result"]
 
-                                # Se l'elaborazione è completata o fallita, termina il polling
-                                if current_status in ["completed", "failed", "error"]:
-                                    st.session_state.query_in_progress = False
+                                    # Svuota il container di progresso
+                                    progress_container.empty()
 
-                                    if current_status == "completed" and "result" in status_data:
-                                        # Mostra i risultati
-                                        result_data = status_data["result"]
+                                    # Mostra stato cache
+                                    cache_status = "✅ Query recuperata dalla cache!" if result_data.get("cache_used", False) \
+                                        else "📝 Nuova query generata"
 
-                                        # Assicuriamoci che progress_container sia vuoto prima di mostrare i risultati
-                                        progress_container.empty()
+                                    # Mostra informazioni sui tentativi
+                                    attempts_info = ""
+                                    if not result_data.get("cache_used", False) and "attempts" in result_data:
+                                        attempts_info = f" dopo {result_data['attempts']} tentativi"
 
-                                        # Mostra cache_used
-                                        cache_status = "✅ Query recuperata dalla cache!" if result_data.get("cache_used", False) \
-                                            else "📝 Nuova query generata "
+                                    st.success(f"Analisi completata! {cache_status}{attempts_info}")
 
-                                        # Mostra il numero di tentativi (solo se non è stata usata la cache)
-                                        attempts_info = ""
-                                        if not result_data.get("cache_used", False) and "attempts" in result_data:
-                                            attempts_info = f" dopo {result_data['attempts']} tentativi"
+                                    # Visualizza i risultati
+                                    ResultVisualizer.display_results(result_data)
+                                elif current_status in ["failed", "error"]:
+                                    error_message = status_data.get("error", "Errore sconosciuto")
+                                    st.error(f"❌ L'elaborazione è fallita: {error_message}")
 
-                                        st.success(f"Analisi completata! {cache_status}{attempts_info}")
-
-                                        # Mostra i risultati
-                                        ResultVisualizer.display_results(result_data)
-                                    elif current_status in ["failed", "error"]:
-                                        error_message = status_data.get("error", "Errore sconosciuto")
-                                        st.error(f"❌ L'elaborazione è fallita: {error_message}")
-
-                                        if "error_traceback" in status_data:
-                                            with st.expander("Dettagli errore"):
-                                                st.code(status_data["error_traceback"])
-
+                                    if "error_traceback" in status_data:
+                                        with st.expander("Dettagli errore"):
+                                            st.code(status_data["error_traceback"])
+                            else:
+                                # Se non è completata, continua il polling con un rerun
+                                time.sleep(0.1)  # Breve pausa per evitare sovraccarichi
+                                st.experimental_rerun()
                         else:
-                            # Se abbiamo già una query_status, continuiamo a mostrarla mentre aspettiamo il prossimo update
-                            if st.session_state.query_status:
-                                status_data = st.session_state.query_status
-                                progress = status_data.get("progress", 0)
-                                progress_bar.progress(progress / 100)
-
-                                status_message = status_data.get("message", "Elaborazione in corso...")
-                                current_step = status_data.get("step", "")
-                                current_status = status_data.get("status", "")
-
-                                icon = status_icons.get(current_status, "🔄")
-                                step_desc = step_descriptions.get(current_step, current_step.replace("_", " ").title())
-
-                                attempts_info = ""
-                                if "attempts" in status_data and status_data["attempts"] > 0:
-                                    attempts_info = f" (Tentativo {status_data['attempts']})"
-
-                                status_container.info(f"{icon} **{step_desc}**{attempts_info}: {status_message}")
+                            st.error(f"Errore nel recupero dello stato: HTTP {response.status_code}")
+                            st.session_state.query_in_progress = False
+                            st.session_state.polling_active = False
                     except Exception as e:
                         st.error(f"Errore nel recupero dello stato: {e}")
                         st.session_state.query_in_progress = False
+                        st.session_state.polling_active = False
+                else:
+                    # Se abbiamo già dati di stato recenti, mostriamo l'ultimo stato conosciuto
+                    if st.session_state.query_status:
+                        status_data = st.session_state.query_status
+
+                        # Aggiorna la progress bar con l'ultimo valore noto
+                        progress = status_data.get("progress", 0)
+                        progress_bar.progress(progress / 100)
+
+                        # Mostra l'ultimo messaggio di stato noto
+                        status_message = status_data.get("message", "Elaborazione in corso...")
+                        current_step = status_data.get("step", "")
+                        current_status = status_data.get("status", "")
+
+                        icon = status_icons.get(current_status, "🔄")
+                        step_desc = step_descriptions.get(current_step, current_step.replace("_", " ").title())
+
+                        attempts_info = ""
+                        if "attempts" in status_data and status_data["attempts"] > 0:
+                            attempts_info = f" (Tentativo {status_data['attempts']})"
+
+                        status_container.info(f"{icon} **{step_desc}**{attempts_info}: {status_message}")
+
+                    # Forza rerun solo se siamo in attesa attiva
+                    if st.session_state.polling_active:
+                        time.sleep(0.1)  # Breve pausa
+                        st.experimental_rerun()
 
         return {
             "action": "cerca" if st.session_state.cerca_clicked else ("refresh" if st.session_state.refresh_clicked else None),
@@ -917,59 +956,76 @@ def main():
     # Logout nella sidebar
     auth_manager.logout()
 
+    # Debugging dello stato della sessione (opzionale)
+    # st.sidebar.write("Debug - query_in_progress:", st.session_state.get("query_in_progress", False))
+    # st.sidebar.write("Debug - query_id:", st.session_state.get("query_id", None))
+
     # Rendering della sidebar
     ui.render_sidebar()
 
-    # Rendering dell'interfaccia principale
-    ui_data = ui.render_main_interface()
+    # Gestione di query in corso
+    if st.session_state.get("query_in_progress", False) and st.session_state.get("query_id"):
+        # Già in elaborazione, continua con l'interfaccia principale
+        ui_data = ui.render_main_interface()
+    else:
+        # Rendering dell'interfaccia principale per nuove query
+        ui_data = ui.render_main_interface()
 
-    # Gestione dell'azione "Cerca"
-    if ui_data.get("action") == "cerca" and not st.session_state.query_in_progress:
-        st.session_state.cerca_clicked = False
+        # Gestione dell'azione "Cerca"
+        if ui_data.get("action") == "cerca":
+            st.session_state.cerca_clicked = False
 
-        domanda = ui_data["domanda"]
-        if domanda and domanda != "Scrivi la tua domanda...":
-            # Imposta lo stato come "in elaborazione"
-            st.session_state.query_in_progress = True
+            domanda = ui_data["domanda"]
+            if domanda and domanda != "Scrivi la tua domanda...":
+                # Mostra messaggio di avvio
+                st.info("🚀 Avvio analisi...")
 
-            # Ottieni la configurazione corrente
-            llm_config = credentials_manager.get_llm_config()
+                # Ottieni la configurazione corrente
+                llm_config = credentials_manager.get_llm_config()
 
-            # Esegui la richiesta in modo asincrono
-            response = backend_client.execute_query(
-                domanda=domanda,
-                llm_config=llm_config,
-                ssh_config=credentials_manager.get_ssh_config(),
-                db_config=credentials_manager.get_db_config(),
-                force_no_cache=ui_data["force_no_cache"]
-            )
+                # Esegui la richiesta
+                try:
+                    response = backend_client.execute_query(
+                        domanda=domanda,
+                        llm_config=llm_config,
+                        ssh_config=credentials_manager.get_ssh_config(),
+                        db_config=credentials_manager.get_db_config(),
+                        force_no_cache=ui_data["force_no_cache"]
+                    )
 
-            if response.status_code == 200:
-                data = response.json()
-                # Salva l'ID della query per il polling
-                st.session_state.query_id = data.get("query_id")
-                st.info("🚀 Analisi avviata! Attendi il completamento...")
-                st.experimental_rerun()  # Forza il refresh per iniziare il polling
+                    if response.status_code == 200:
+                        data = response.json()
+                        # Imposta stato di elaborazione e ID query
+                        st.session_state.query_in_progress = True
+                        st.session_state.query_id = data.get("query_id")
+                        st.success("🚀 Analisi avviata! La pagina verrà aggiornata automaticamente...")
+                        # Forza il refresh con un piccolo ritardo per assicurarsi che lo stato sia salvato
+                        time.sleep(0.5)
+                        st.experimental_rerun()
+                    else:
+                        st.error(f"❌ Errore nell'elaborazione della richiesta: {response.text}")
+                except Exception as e:
+                    st.error(f"❌ Errore nella comunicazione col backend: {str(e)}")
             else:
-                st.error(f"❌ Errore nell'elaborazione della richiesta: {response.text}")
-                st.session_state.query_in_progress = False
-        else:
-            st.warning("Per favore, inserisci una domanda da analizzare.")
+                st.warning("Per favore, inserisci una domanda da analizzare.")
 
-    # Gestione dell'azione "Riscansiona Database"
-    if ui_data.get("action") == "refresh":
-        st.session_state.refresh_clicked = False
+        # Gestione dell'azione "Riscansiona Database"
+        if ui_data.get("action") == "refresh":
+            st.session_state.refresh_clicked = False
 
-        st.info("Avvio riscansione del database...")
-        response = backend_client.refresh_schema(
-            ssh_config=credentials_manager.get_ssh_config(),
-            db_config=credentials_manager.get_db_config()
-        )
+            st.info("Avvio riscansione del database...")
+            try:
+                response = backend_client.refresh_schema(
+                    ssh_config=credentials_manager.get_ssh_config(),
+                    db_config=credentials_manager.get_db_config()
+                )
 
-        if response.status_code == 200:
-            st.success("✅ Struttura del database aggiornata!")
-        else:
-            st.error(f"❌ Errore durante la riscansione del database: {response.text}")
+                if response.status_code == 200:
+                    st.success("✅ Struttura del database aggiornata!")
+                else:
+                    st.error(f"❌ Errore durante la riscansione del database: {response.text}")
+            except Exception as e:
+                st.error(f"❌ Errore nella comunicazione col backend: {str(e)}")
 
 
 # Punto di ingresso dell'applicazione
