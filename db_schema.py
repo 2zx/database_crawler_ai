@@ -37,34 +37,56 @@ def get_db_schema(engine, force_refresh=False):
             "cleanup_",
             "mis_report",
             "tags_",
-            "tmp_"
+            "tmp_",
+            "queue_"
+        ]
+
+        ignore_contains = [
+            "config",
+            "settings",
+            "report",
+            "wizard"
         ]
 
         # Verifica se la tabella ha un prefisso da ignorare
-        should_ignore = any(table_name.startswith(prefix) for prefix in ignore_prefixes)
+        should_ignore_p = any(table_name.startswith(prefix) for prefix in ignore_prefixes)
+        should_ignore_c = any(prefix in table_name for prefix in ignore_contains)
+        should_ignore_s = table_name.endswith("_rel")
 
         # Salta questa tabella se ha un prefisso da ignorare
-        if should_ignore or "report" in table_name or "wizard" in table_name:
-            logger.info(f"⏭️ Ignoro tabella {table_name} (prefisso nella lista da ignorare)")
+        if should_ignore_p or should_ignore_c or should_ignore_s:
+            logger.info(f"⏭️ Ignoro tabella {table_name}")
+            continue
+
+        # TMP
+        # Definiamo le parole chiave di interesse
+        keywords_of_interest = ["partner", "product", "invoice", "sale", "purchase",
+                                "stock", "account_analytic_account", "country"]
+
+        # Verifichiamo se la tabella NON contiene nessuna delle parole chiave
+        if not any(keyword in table_name for keyword in keywords_of_interest):
+            logger.info(f"⏭️ Ignoro tabella {table_name}")
             continue
 
         logger.info(f"📊 Ispeziono tabella {table_name}")
         columns = inspector.get_columns(table_name)
         foreign_keys = inspector.get_foreign_keys(table_name)
-        indexes = inspector.get_indexes(table_name)  # ✅ Ora recuperiamo anche gli indici
+        #  indexes = inspector.get_indexes(table_name)  # ✅ Ora recuperiamo anche gli indici
+
+        ignore_columns = ["create_uid", "write_uid", "create_date", "write_date"]
 
         schema_info[table_name] = {
-            "columns": {
+            "cols": {
                 col["name"]: {
                     "type": str(col["type"]),  # ✅ Salviamo il tipo di dato
                     "comment": col.get("comment", "")  # ✅ Recuperiamo i commenti
                 }
-                for col in columns
+                for col in columns if col["name"] not in ignore_columns
             },
-            "foreign_keys": {
-                fk["constrained_columns"][0]: fk["referred_table"] for fk in foreign_keys
+            "fk": {
+                fk["constrained_columns"][0]: fk["referred_table"] for fk in foreign_keys if fk["constrained_columns"][0] not in ignore_columns
             },
-            "indexes": {idx["name"]: idx["column_names"] for idx in indexes}  # ✅ Salviamo gli indici
+            #  "indexes": {idx["name"]: idx["column_names"] for idx in indexes if idx["name"] not in ignore_columns}  # ✅ indici
         }
 
     # 🔥 Salva la struttura nel file di cache

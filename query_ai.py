@@ -1,5 +1,6 @@
 import base64
 import io
+import math
 import pandas as pd  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import os
@@ -184,10 +185,22 @@ def process_query_results(engine, sql_query, domanda, llm_config):
         if plot_code:
             path_grafico = execute_generated_plot_code(plot_code)  # ✅ Eseguiamo il codice per generare il grafico
 
+        # Prima di restituire la risposta, sanitizza i valori float
+        sanitized_data = []
+        for record in df.to_dict(orient="records"):
+            sanitized_record = {}
+            for key, value in record.items():
+                # Gestisci valori float anomali
+                if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+                    sanitized_record[key] = None
+                else:
+                    sanitized_record[key] = value
+            sanitized_data.append(sanitized_record)
+
         return {
             "descrizione": risposta,
-            "dati": df.to_dict(orient="records"),
-            "grafici": path_grafico if "generated_plot" in path_grafico else None  # ✅ Restituiamo i grafici generati dall'AI
+            "dati": sanitized_data,  # Usa i dati sanitizzati
+            "grafici": path_grafico if "generated_plot" in path_grafico else None
         }
 
     except Exception as e:
