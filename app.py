@@ -357,6 +357,7 @@ async def process_query_in_background(query_id, request_data):
             llm_config,
             use_cache,
             engine,
+            3,
             progress_callback=lambda status, message, step, progress:
                 query_progress[query_id].update({
                     "status": status,
