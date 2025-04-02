@@ -4,6 +4,8 @@ services:
     working_dir: /app
     volumes:
       - .:/app  # 🔥 Monta il codice locale nel container
+      - ./odbcinst.ini:/etc/odbcinst.ini  # Configurazione ODBC
+      - ./odbc.ini:/etc/odbc.ini  # Configurazione ODBC
     ports:
       - "8000:8000"
     networks:
@@ -16,6 +18,8 @@ services:
     volumes:
       - .:/app  # 🔥 Monta il codice locale nel container
       - frontend_data:/app/data  # Volume persistente per le credenziali
+      - ./odbcinst.ini:/etc/odbcinst.ini  # Configurazione ODBC
+      - ./odbc.ini:/etc/odbc.ini  # Configurazione ODBC
     ports:
       - "8501:8501"
     depends_on:

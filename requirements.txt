@@ -3,6 +3,8 @@ uvicorn
 pydantic
 sqlalchemy
 psycopg2
+pymssql  # Driver SQL Server
+pyodbc  # Driver alternativo per SQL Server
 pandas==1.5.3
 numpy==1.23.5
 pandasai
@@ -10,6 +12,7 @@ openai>=1.0.0
 anthropic>=0.7.0
 httpx
 streamlit
+streamlit-autorefresh
 requests
 paramiko
 sshtunnel

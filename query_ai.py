@@ -34,13 +34,14 @@ def encode_figure_to_base64(fig):
     return base64.b64encode(img_bytes.read()).decode("utf-8")
 
 
-def generate_sql_query(domanda, db_schema, llm_config):
+def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
     """
     Genera una query SQL basata sulla domanda dell'utente e sulla struttura del database.
 
     :param domanda: La domanda dell'utente in linguaggio naturale
     :param db_schema: Dizionario contenente la struttura del database (tabelle, colonne, chiavi esterne)
     :param llm_config: Configurazione del LLM (provider, api_key, ecc.)
+    :param db_type: Tipo di database ("postgresql" o "sqlserver")
     :return: Una query SQL generata dall'AI
     """
 
@@ -48,13 +49,30 @@ def generate_sql_query(domanda, db_schema, llm_config):
     formatted_hints = format_hints_for_prompt()
     hints_section = f"\n\n{formatted_hints}\n" if formatted_hints else ""
 
+    # Adatta il prompt in base al tipo di database
+    db_type_desc = "PostgreSQL" if db_type == "postgresql" else "Microsoft SQL Server"
+
+    # Aggiungi eventuali differenze sintattiche specifiche per SQL Server
+    syntax_notes = ""
+    if db_type == "sqlserver":
+        syntax_notes = """
+        Note specifiche per SQL Server:
+        - Usa TOP invece di LIMIT per limitare i risultati
+        - Usa GETDATE() invece di NOW() per la data corrente
+        - Usa DATEADD() e DATEDIFF() per le operazioni sulle date
+        - Usa CONVERT() invece di CAST() per le conversioni di tipo
+        - Le stringhe sono racchiuse tra apici singoli
+        - Per limitare e ordinare contemporaneamente, usa ORDER BY prima di TOP
+        """
+
     prompt_sql = f"""
-    Sei un esperto di database SQL. Ti verrà fornita la struttura di un database PostgreSQL,
+    Sei un esperto di database SQL. Ti verrà fornita la struttura di un database {db_type_desc},
     comprensivo di tabelle, colonne, chiavi primarie e straniere, indici e commenti.
     I commenti sono utili per capire il senso della colonna e il tipo di dati che contiene e come il devi interpretare.
     Riceverai una domanda posta da un utente in linguaggio naturale.
     Dovrai generare una query SQL che risponda alla domanda dell'utente.
     Devi restituire **solo** la query SQL necessaria per ottenere la risposta.
+    {syntax_notes}
 
     **Struttura del Database:**
     {db_schema}{hints_section}
@@ -63,7 +81,7 @@ def generate_sql_query(domanda, db_schema, llm_config):
     "{domanda}"
 
     Genera **solo** la query SQL senza alcuna spiegazione o testo aggiuntivo.
-    Verifica che la query sia sintatticamente corretta e coerente con la struttura del database e con la domanda dell'utente.
+    Verifica che la query sia sintatticamente corretta per {db_type_desc} e coerente con la struttura del database e con la domanda dell'utente.
     Non generare mai valori inventati.
     """
 
@@ -102,6 +120,16 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
             - cache_used: Indica se la query è stata recuperata dalla cache
             - tentativi_effettuati: Numero di tentativi effettuati
     """
+
+    # Determina il tipo di database dall'engine
+    db_type = engine.dialect.name
+    # Converti il nome del dialetto in 'postgresql' o 'sqlserver'
+    if db_type.startswith('mysql'):
+        db_type = 'mysql'
+    elif db_type.startswith('mssql') or db_type.startswith('pyodbc'):
+        db_type = 'sqlserver'
+    else:
+        db_type = 'postgresql'  # Default
 
     attempts = 0
     error_history = []
@@ -186,7 +214,7 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
         query_prompt = domanda + error_context
 
         # Genera la query SQL
-        query_sql = generate_sql_query(query_prompt, db_schema, llm_config)
+        query_sql = generate_sql_query(query_prompt, db_schema, llm_config, db_type)
 
         # Se non è stata generata una query valida, continua
         if not query_sql:

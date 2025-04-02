@@ -45,6 +45,7 @@ class DBConfig(BaseModel):
     user: str
     password: str
     database: str
+    db_type: str = "postgresql"  # postgresql o sqlserver
 
 
 class LLMConfig(BaseModel):
@@ -78,24 +79,30 @@ class HintUpdateRequest(BaseModel):
     active: Optional[int] = None
 
 
-def create_ssh_tunnel(ssh_host, ssh_user, ssh_key, db_host, db_port):
-    """Crea un tunnel SSH per connettersi al database remoto e ritorna l'oggetto server."""
+def create_ssh_tunnel(ssh_host, ssh_user, ssh_key, db_host, db_port, db_type="postgresql"):
+    """
+    Crea un tunnel SSH per connettersi al database remoto e ritorna l'oggetto server.
+    Supporta sia PostgreSQL che SQL Server.
+    """
     try:
-        logger.info(f"🔌 Creazione del tunnel SSH verso {ssh_host} per connettersi a {db_host}:{db_port}")
+        logger.info(f"🔌 Creazione del tunnel SSH verso {ssh_host} per connettersi a {db_host}:{db_port} ({db_type})")
 
         # Creazione della chiave privata corretta
         pkey = paramiko.RSAKey(file_obj=io.StringIO(ssh_key))
+
+        # Determina la porta locale in base al tipo di database per evitare conflitti
+        local_port = 5433 if db_type == "postgresql" else 5434
 
         server = SSHTunnelForwarder(
             (ssh_host, 22),
             ssh_username=ssh_user,
             ssh_pkey=pkey,
             remote_bind_address=(db_host, int(db_port)),
-            local_bind_address=('127.0.0.1', 5433)
+            local_bind_address=('127.0.0.1', local_port)
         )
         server.start()
-        logger.info("✅ Tunnel SSH creato con successo!")
-        return server
+        logger.info(f"✅ Tunnel SSH creato con successo per {db_type} sulla porta locale {local_port}!")
+        return server, local_port
     except Exception as e:
         logger.error(f"❌ Errore nel tunnel SSH: {e}")
         raise HTTPException(status_code=500, detail=f"Errore nel tunnel SSH: {str(e)}")
@@ -110,16 +117,31 @@ def refresh_db_schema(request: RefreshRequest):
         logger.info("🔄 Forzata nuova scansione del database...")
 
         # Crea il tunnel SSH
-        ssh_tunnel = create_ssh_tunnel(
+        ssh_tunnel, local_port = create_ssh_tunnel(
             request.ssh_config.ssh_host,
             request.ssh_config.ssh_user,
             request.ssh_config.ssh_key,
             request.db_config.host,
-            request.db_config.port
+            request.db_config.port,
+            request.db_config.db_type
         )
 
-        # Connessione al database
-        db_url = f"postgresql://{request.db_config.user}:{request.db_config.password}@127.0.0.1:5433/{request.db_config.database}"
+        # Connessione al database in base al tipo
+        if request.db_config.db_type == "sqlserver":
+            # Per SQL Server
+            db_url = (
+                f"mssql+pymssql://{request.db_config.user}:{request.db_config.password}"
+                f"@127.0.0.1:{local_port}/{request.db_config.database}"
+            )
+            logger.info(f"🔗 Connessione a SQL Server: {db_url}")
+        else:
+            # Per PostgreSQL (default)
+            db_url = (
+                f"postgresql://{request.db_config.user}:{request.db_config.password}"
+                f"@127.0.0.1:{local_port}/{request.db_config.database}"
+            )
+            logger.info(f"🔗 Connessione a PostgreSQL: {db_url}")
+
         engine = create_engine(db_url)
 
         # Forza la scansione della struttura
@@ -133,6 +155,13 @@ def refresh_db_schema(request: RefreshRequest):
 
     except Exception as e:
         logger.error(f"❌ ERRORE: {traceback.format_exc()}")
+        # Assicuriamoci di chiudere il tunnel SSH se esiste
+        try:
+            if 'ssh_tunnel' in locals():
+                ssh_tunnel.stop()
+                logger.info("🔌 Tunnel SSH chiuso dopo errore.")
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"Errore durante la riscansione: {str(e)}")
 
 
@@ -300,17 +329,30 @@ async def process_query_in_background(query_id, request_data):
         })
 
         # Crea il tunnel SSH
-        ssh_tunnel = create_ssh_tunnel(
+        ssh_tunnel, local_port = create_ssh_tunnel(
             request_data.ssh_config.ssh_host,
             request_data.ssh_config.ssh_user,
             request_data.ssh_config.ssh_key,
             request_data.db_config.host,
-            request_data.db_config.port
+            request_data.db_config.port,
+            request_data.db_config.db_type
         )
 
-        # Configura la connessione al database
-        db_url = f"postgresql://{request_data.db_config.user}:{request_data.db_config.password}@127.0.0.1:5433/{request_data.db_config.database}"
-        logger.info(f"🔗 Connessione a PostgreSQL: {db_url}")
+        # Configura la connessione al database in base al tipo
+        if request_data.db_config.db_type == "sqlserver":
+            # Per SQL Server
+            db_url = (
+                f"mssql+pymssql://{request_data.db_config.user}:{request_data.db_config.password}"
+                f"@127.0.0.1:{local_port}/{request_data.db_config.database}"
+            )
+            logger.info(f"🔗 Connessione a SQL Server: {db_url}")
+        else:
+            # Per PostgreSQL (default)
+            db_url = (
+                f"postgresql://{request_data.db_config.user}:{request_data.db_config.password}"
+                f"@127.0.0.1:{local_port}/{request_data.db_config.database}"
+            )
+            logger.info(f"🔗 Connessione a PostgreSQL: {db_url}")
 
         engine = create_engine(db_url)
 
