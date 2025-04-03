@@ -67,11 +67,11 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
 
     prompt_sql = f"""
     Sei un esperto di database SQL. Ti verrà fornita la struttura di un database {db_type_desc},
-    comprensivo di tabelle, colonne, chiavi primarie e straniere, indici e commenti.
-    I commenti sono utili per capire il senso della colonna e il tipo di dati che contiene e come il devi interpretare.
+    comprensivo di tabelle, colonne, chiavi primarie e commenti,
+    considera che tutte le tabelle hanno una primary_key denominata id.
     Riceverai una domanda posta da un utente in linguaggio naturale.
-    Dovrai generare una query SQL che risponda alla domanda dell'utente.
-    Devi restituire **solo** la query SQL necessaria per ottenere la risposta.
+    Dovrai generare una query SQL che risponda alla domanda dell'utente restituendo **solo**
+    la query SQL necessaria per ottenere la risposta senza alcuna spiegazione o testo aggiuntivo.
     {syntax_notes}
 
     **Struttura del Database:**
@@ -80,8 +80,7 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
     **Domanda dell'utente:**
     "{domanda}"
 
-    Genera **solo** la query SQL senza alcuna spiegazione o testo aggiuntivo.
-    Verifica che la query sia sintatticamente corretta per {db_type_desc} e coerente con la struttura del database e con la domanda dell'utente.
+    Verifica che la query sia sintatticamente corretta per {db_type_desc} e coerente con la struttura del database.
     Non generare mai valori inventati.
     """
 
@@ -163,7 +162,7 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
             try:
                 with engine.connect() as connection:
                     # Utilizziamo EXPLAIN per verificare la validità della query senza eseguirla completamente
-                    connection.execute(text("explain " + cached_query))
+                    try_query_execution(db_type, cached_query, connection)
 
                 update_progress(
                     "cache_valid",
@@ -245,7 +244,7 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
             # Prova a eseguire la query
             with engine.connect() as connection:
                 start_time = time.time()
-                pd.read_sql(text("explain " + query_sql), connection)
+                try_query_execution(db_type, query_sql, connection)
                 execution_time = time.time() - start_time
 
                 print(f"✅ Anteprima query (explain) eseguita con successo al tentativo {attempts}/{max_attempts}")
@@ -305,6 +304,17 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
 
     # Non dovremmo mai arrivare qui, ma per sicurezza
     return query_sql, False, attempts
+
+
+def try_query_execution(db_type, cached_query, connection):
+    if db_type == 'postgresql':
+        connection.execute(text("explain " + cached_query))
+    elif db_type == 'sqlserver':
+        connection.execute(text("SET SHOWPLAN_ALL ON;"))
+        connection.execute(text(cached_query))
+        connection.execute(("SET SHOWPLAN_ALL OFF;"))
+    else:
+        raise ValueError(f"Tipo di database non supportato: {db_type}")
 
 
 def clean_query(query_sql):

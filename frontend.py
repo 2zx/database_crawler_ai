@@ -8,7 +8,6 @@ import json
 import time
 import pandas as pd   # type: ignore
 import streamlit as st   # type: ignore
-from streamlit_autorefresh import st_autorefresh   # type: ignore
 import requests   # type: ignore
 from io import BytesIO
 from dotenv import load_dotenv   # type: ignore
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Costanti dell'applicazione
-APP_TITLE = "Analisi AI Database con Tunnel SSH"
+APP_TITLE = "Analisi AI Database"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "/app/credentials.json")
 
@@ -44,6 +43,9 @@ LLM_PROVIDERS = {
     "ernie": {"name": "Baidu ERNIE", "api_key_name": "ernie_api_key", "requires_secret": True,
               "secret_key_name": "ernie_secret_key"}
 }
+
+# temp
+st.session_state.logged_in = True
 
 
 class AuthManager:
@@ -411,6 +413,10 @@ class UserInterface:
             # Ottieni l'ID del modello selezionato
             selected_model = next(model_id for model_id, name in model_options if name == selected_model_name)
             self.credentials_manager.credentials[f"{selected_provider}_model"] = selected_model
+
+        if st.button("💾 Salva configurazione"):
+            self.credentials_manager.save_credentials()
+            st.success("✅ Configurazione salvata con successo!")
 
     def render_connection_settings(self):
         """Visualizza le impostazioni di connessione nella sidebar."""

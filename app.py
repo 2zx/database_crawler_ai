@@ -10,7 +10,6 @@ from query_ai import generate_query_with_retry, process_query_results
 from db_schema import get_db_schema
 import logging
 from database import create_db
-from database import DB_PATH as DATABASE_PATH
 from hint_manager import (
     add_hint, update_hint, delete_hint, toggle_hint_status,
     get_all_hints, get_active_hints, get_hint_by_id,
@@ -145,7 +144,7 @@ def refresh_db_schema(request: RefreshRequest):
         engine = create_engine(db_url)
 
         # Forza la scansione della struttura
-        db_schema = get_db_schema(engine, force_refresh=True)
+        db_schema = get_db_schema(engine, request.db_config.db_type, force_refresh=True)
 
         # Chiude il tunnel SSH
         ssh_tunnel.stop()
@@ -262,25 +261,6 @@ def get_hint_categories():
     # Otteniamo le categorie predefinite
     categories = ["generale"]
 
-    # Aggiungiamo categorie basate sulla tabella
-    try:
-        # Usare il percorso standardizzato
-        engine = create_engine(f"sqlite:///{DATABASE_PATH}")
-        db_schema = get_db_schema(engine, force_refresh=False)
-
-        if db_schema:
-            # Aggiungiamo categorie per tabelle
-            for table_name in db_schema.keys():
-                if table_name != "relationships":
-                    categories.append(f"tabella:{table_name}")
-
-                    # Aggiungiamo categorie per colonne
-                    if isinstance(db_schema[table_name], dict) and "colonne" in db_schema[table_name]:
-                        for column in db_schema[table_name]["colonne"]:
-                            categories.append(f"colonna:{table_name}.{column}")
-    except Exception as e:
-        logger.error(f"❌ Errore nel recupero delle categorie: {e}")
-
     return {"categories": categories}
 
 
@@ -366,7 +346,7 @@ async def process_query_in_background(query_id, request_data):
 
         # Recupera la struttura del database
         logger.info("📊 Provo recupero struttura db")
-        db_schema = get_db_schema(engine)
+        db_schema = get_db_schema(engine, request_data.db_config.db_type)
         logger.info(f"📊 Struttura del database recuperata: {db_schema.keys()}")
 
         # Aggiorna lo stato: generazione query SQL
@@ -398,7 +378,7 @@ async def process_query_in_background(query_id, request_data):
             llm_config,
             use_cache,
             engine,
-            3,
+            5,
             progress_callback=lambda status, message, step, progress:
                 query_progress[query_id].update({
                     "status": status,
@@ -504,9 +484,9 @@ def get_available_models():
             {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "description": "Buon rapporto qualità-prezzo"}
         ],
         "claude": [
-            {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku", "description": "Modello veloce ed economico"},
-            {"id": "claude-3-sonnet-20240229", "name": "Claude 3 Sonnet", "description": "Bilanciato per performance e costo"},
-            {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus", "description": "Modello più potente"}
+            {"id": "claude-3.5-haiku-20241022", "name": "Claude 3.5 Haiku", "description": "Modello veloce ed economico"},
+            {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "description": "Bilanciato per performance e costo"},
+            {"id": "claude-3.7-sonnet-20250224", "name": "Claude 3.7 Sonnet", "description": "Modello più potente"}
         ],
         "deepseek": [
             {"id": "deepseek-chat", "name": "DeepSeek Chat", "description": "Modello di chat generale"},

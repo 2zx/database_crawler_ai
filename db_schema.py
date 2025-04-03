@@ -8,7 +8,7 @@ from config import DB_SCHEMA_CACHE_PATH
 logger = logging.getLogger(__name__)
 
 
-def get_db_schema(engine, force_refresh=False):
+def get_db_schema(engine, db_type, force_refresh=False):
     """
     Recupera la struttura del database: tabelle, colonne, chiavi esterne, indici e commenti.
     Usa la cache salvata su file per evitare richieste ripetute al DB.
@@ -21,7 +21,12 @@ def get_db_schema(engine, force_refresh=False):
     if not force_refresh and os.path.exists(DB_SCHEMA_CACHE_PATH):
         logger.info("📄 Carico la struttura del database dalla cache")
         with open(DB_SCHEMA_CACHE_PATH, "r") as file:
-            return json.load(file)
+            cache_data = json.load(file)
+            if isinstance(cache_data, dict) and db_type in cache_data:
+                return cache_data[db_type]
+            else:
+                # Retrocompatibilità: il file contiene solo una struttura, non separata per db_type
+                return cache_data
 
     logger.info("🔍 Riscansione della struttura del database...")
     inspector = inspect(engine)
@@ -59,6 +64,7 @@ def get_db_schema(engine, force_refresh=False):
             "tags_",
             "tmp_",
             "queue_"
+        ] if db_type == "postgresql" else [
         ]
 
         ignore_contains = [
@@ -66,11 +72,14 @@ def get_db_schema(engine, force_refresh=False):
             "settings",
             "report",
             "wizard"
+        ] if db_type == "postgresql" else [
         ]
 
         # Verifica se la tabella ha un prefisso da ignorare
-        should_ignore_p = any(table_name.startswith(prefix) for prefix in ignore_prefixes)
-        should_ignore_c = any(prefix in table_name for prefix in ignore_contains)
+        should_ignore_p = any(table_name.startswith(prefix)
+                              for prefix in ignore_prefixes)
+        should_ignore_c = any(
+            prefix in table_name for prefix in ignore_contains)
         should_ignore_s = table_name.endswith("_rel")
 
         # Salta questa tabella se ha un prefisso da ignorare
@@ -83,7 +92,8 @@ def get_db_schema(engine, force_refresh=False):
         keywords_of_interest = [
             "partner", "product", "invoice", "sale", "purchase",
             "stock", "account", "country", "company",
-            "mrp", "maintenance", "fleet", "hr",
+            "mrp", "maintenance", "fleet", "hr", "itinerary"
+        ] if db_type == "postgresql" else [
             "produzione", "clienti", "articoli", "clientiarticoli"
         ]
 
@@ -97,12 +107,16 @@ def get_db_schema(engine, force_refresh=False):
         # Ottieni colonne e chiavi in base al tipo di database
         if db_type == "mssql" and table_schema:
             columns = inspector.get_columns(table_name, schema=table_schema)
-            foreign_keys = inspector.get_foreign_keys(table_name, schema=table_schema)
+            foreign_keys = inspector.get_foreign_keys(
+                table_name, schema=table_schema)
         else:
             columns = inspector.get_columns(table_name)
             foreign_keys = inspector.get_foreign_keys(table_name)
 
-        ignore_columns = ["create_uid", "write_uid", "create_date", "write_date"]
+        ignore_columns = [
+            "create_uid", "write_uid",
+            "create_date", "write_date", "id", "sequence"
+        ] if db_type == "postgresql" else []
 
         # Adattamento per gestire le differenze nei metadati tra PostgreSQL e SQL Server
         table_cols = {}
@@ -113,10 +127,12 @@ def get_db_schema(engine, force_refresh=False):
                 # Gestisci i commenti diversamente tra DB
                 if db_type == "mssql":
                     # SQL Server non espone direttamente i commenti, possiamo aggiungerli manualmente se necessario
-                    col_info["comment"] = ""
+                    pass
                 else:
                     # PostgreSQL
-                    col_info["comment"] = col.get("comment", "")
+                    if col.get("comment", "") and col.get("comment", "").lower() != snake_to_label(col["name"]).lower():
+                        # logger.info(f"⏭️ {col.get('comment', '').lower()} -- {snake_to_label(col['name']).lower()}")
+                        col_info["comment"] = col.get("comment", "")
 
                 table_cols[col["name"]] = col_info
 
@@ -131,14 +147,25 @@ def get_db_schema(engine, force_refresh=False):
             "fk": table_fk
         }
 
-    schema_info = clean_db_schema(schema_info)
+    cache_data = get_cached_db_schema()
+    cache_data[db_type] = clean_db_schema(schema_info)
 
-    # 🔥 Salva la struttura nel file di cache
+    logger.info(f"chiavi {cache_data.keys()}")
+
     with open(DB_SCHEMA_CACHE_PATH, "w") as file:
-        json.dump(schema_info, file)
+        json.dump(cache_data, file, indent=2)
 
-    logger.info("✅ Struttura del database salvata su file")
-    return schema_info
+        logger.info("✅ Struttura del database salvata su file")
+        return schema_info
+
+
+def snake_to_label(snake_str):
+    parts = snake_str.split('_')
+    # Rimuove "id" se è l'ultimo elemento
+    if parts[-1] == 'id':
+        parts = parts[:-1]
+    # Capitalizza solo il primo termine, unisci con spazio
+    return ' '.join(parts)
 
 
 def clean_db_schema(db_schema):
@@ -153,6 +180,11 @@ def clean_db_schema(db_schema):
     Returns:
         dict: Lo schema pulito
     """
+
+    # Se lo schema è vuoto, non fare nulla
+    if not db_schema:
+        return {}
+
     # Ottieni l'insieme di tutte le tabelle presenti nello schema
     available_tables = set(db_schema.keys())
 
@@ -231,7 +263,10 @@ def handle_db_connection_error(e, db_type):
         if "Login failed for user" in error_str:
             return "❌ Errore di autenticazione SQL Server: username o password non validi."
         elif "TCP Provider: No connection could be made" in error_str:
-            return "❌ Impossibile connettersi al server SQL Server. Verifica che il server sia in esecuzione e raggiungibile attraverso il tunnel SSH."
+            return (
+                "❌ Impossibile connettersi al server SQL Server. Verifica che il server sia in esecuzione"
+                " e raggiungibile attraverso il tunnel SSH."
+            )
         elif "Database '" in error_str and "' not found" in error_str:
             return "❌ Database SQL Server non trovato. Verifica il nome del database."
         elif "SSL Provider: The certificate chain was issued by an authority that is not trusted" in error_str:
@@ -241,7 +276,10 @@ def handle_db_connection_error(e, db_type):
         if "password authentication failed" in error_str:
             return "❌ Errore di autenticazione PostgreSQL: username o password non validi."
         elif "could not connect to server" in error_str:
-            return "❌ Impossibile connettersi al server PostgreSQL. Verifica che il server sia in esecuzione e raggiungibile attraverso il tunnel SSH."
+            return (
+                "❌ Impossibile connettersi al server PostgreSQL. Verifica che il server sia in esecuzione"
+                " e raggiungibile attraverso il tunnel SSH."
+            )
         elif "database" in error_str and "does not exist" in error_str:
             return "❌ Database PostgreSQL non trovato. Verifica il nome del database."
 

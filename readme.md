@@ -1,121 +1,124 @@
-# Database Crawler AI 🚀
 
-## 📌 Panoramica
+# 🧠 Database Crawler AI
 
-**Database Crawler AI** è un'applicazione basata su **FastAPI** e **Streamlit** che permette di: ✅ Generare query SQL in linguaggio naturale con OpenAI 🎯 ✅ Recuperare la struttura del database (tabelle, colonne, chiavi esterne, indici e commenti) 🗄️ ✅ Fornire analisi descrittive e visualizzazioni sui dati 📊 ✅ Permettere il download dei dati in Excel 📥 ✅ Collegarsi a un database PostgreSQL tramite un **tunnel SSH** 🔒
+**Database Crawler AI** è un'applicazione modulare progettata per interagire con database relazionali tramite linguaggio naturale. Utilizza modelli LLM (Large Language Models) per generare, interpretare e ottimizzare query SQL. Include funzionalità avanzate di caching, logging, gestione degli hint e una semplice interfaccia frontend.
+
+## 🚀 Funzionalità Principali
+
+- 🔗 Connessione a database tramite driver ODBC (configurabili via `odbc.ini`)
+- 💬 Interpretazione in linguaggio naturale delle richieste utente e conversione in SQL
+- 🧠 Integrazione con modelli LLM personalizzabili (`llm_manager.py`)
+- ⚙️ Gestione dello schema del database (`db_schema.py`) per facilitare la comprensione da parte del modello AI
+- ⚡ Caching intelligente delle query (`query_cache.py`)
+- ✨ Generazione automatica di hint e ottimizzazioni (`hint_manager.py`)
+- 🐳 Supporto Docker per il deployment rapido
+- 🌐 Frontend minimale (`frontend.py`) per demo o uso diretto
+- 📋 Esempi pratici (`examples.md`)
 
 ## 🛠️ Stack Tecnologico
 
-- **Backend:** FastAPI + SQLAlchemy + OpenAI API
+- **Backend:** FastAPI + SQLAlchemy
 - **Frontend:** Streamlit
-- **Database:** PostgreSQL (accesso via tunnel SSH)
-- **AI:** OpenAI GPT-4o-mini + PandasAI
+- **Database:** PostgreSQL o SQL Server (accesso via tunnel SSH)
+- **AI:** OpenAI, Deepseek, Anthropic
 - **Containerizzazione:** Docker + Docker Compose
 
----
+## 📁 Struttura del Progetto
 
-## 🚀 Installazione e Setup
-
-### 📥 1. Clona il repository
-
-```bash
-git clone https://github.com/tuo-utente/database_crawler_ai.git
-cd database_crawler_ai
+```
+database_crawler_ai/
+├── config.py               # Configurazione centrale dell'app
+├── database.py             # Gestione connessione e interfaccia col DB
+├── db_schema.py            # Parsing dello schema del database
+├── query_ai.py             # Logica di generazione/interazione SQL-AI
+├── llm_manager.py          # Gestione dei modelli LLM
+├── hint_manager.py         # Sistema di suggerimenti e miglioramenti query
+├── query_cache.py          # Caching delle query per performance
+├── frontend.py             # Interfaccia frontend semplice
+├── requirements.txt        # Dipendenze Python
+├── Dockerfile              # Docker container setup
+├── odbc.ini / odbcinst.ini # Configurazione driver ODBC
+├── examples.md             # Esempi di utilizzo
+└── pandasai.log            # File di log operativo
 ```
 
-### 📦 2. Configura le variabili d'ambiente
+## 🛠️ Installazione
 
-Crea un file `` nella root del progetto e inserisci:
+1. **Clona il repository:**
+   ```bash
+   git clone https://github.com/tuo-utente/database-crawler-ai.git
+   cd database-crawler-ai
+   ```
 
-```env
-OPENAI_API_KEY=tuo_openai_api_key
-DATABASE_URL=postgresql://user:password@db:5432/nome_database
-SSH_HOST=10.11.11.4
-SSH_USER=tuo_utente_ssh
-SSH_KEY=~/.ssh/id_rsa
+2. **Crea un ambiente virtuale:**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **Installa le dipendenze:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **(Opzionale) Esegui in Docker:**
+   ```bash
+   docker build -t crawler-ai .
+   docker run -p 8000:8000 crawler-ai
+   ```
+
+## ⚙️ Configurazione
+
+- Imposta le connessioni ODBC nei file `odbc.ini` e `odbcinst.ini`.
+- Modifica `config.py` per i tuoi parametri di connessione, modelli LLM e opzioni runtime.
+- Puoi definire i tuoi modelli LLM nel modulo `llm_manager.py`.
+
+## 📌 Esempio d'Uso
+
+```python
+from query_ai import execute_nl_query
+
+response = execute_nl_query("Qual è il totale delle vendite nel 2024?")
+print(response.sql_query)    # Mostra la query SQL generata
+print(response.result)       # Mostra il risultato della query
 ```
 
-### 🐳 3. Avvia l'applicazione con Docker
+Consulta `examples.md` per ulteriori esempi e scenari reali.
 
-```bash
-docker-compose up --build
-```
+## 💡 Sistema di Hint
 
-L'applicazione sarà accessibile ai seguenti indirizzi:
+Il modulo `hint_manager.py` fornisce un sistema avanzato per la generazione automatica di suggerimenti contestuali (hint) volti a migliorare le query SQL prodotte. Tra le funzionalità:
 
-- **Frontend (Streamlit):** [http://localhost:8501](http://localhost:8501)
-- **Backend (FastAPI):** [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger API Docs)
+- Analisi del contesto semantico della richiesta utente
+- Generazione di suggerimenti per affinare la query
+- Integrazione con i modelli LLM per ottimizzare la precisione
+- Possibilità di estendere regole e logiche di hint personalizzati
 
----
+Questo modulo è particolarmente utile in ambienti in cui le query devono essere spiegabili o migliorabili in modo iterativo.
 
-## 🎮 Utilizzo
+## 🔁 Sistema di Retry con Ottimizzazione Automatica
 
-### 1️⃣ Accedi al Frontend 📺
+Il sistema include una logica di **retry intelligente** per le query SQL generate, pensata per massimizzare l’affidabilità anche in presenza di errori di esecuzione.
 
-Apri [http://localhost:8501](http://localhost:8501) e: ✅ Inserisci i dettagli della connessione **PostgreSQL** e **SSH** 🔐 ✅ Scrivi una domanda in linguaggio naturale (es. *"Mostrami il totale delle vendite per categoria"*) 📝 ✅ L'AI genererà la query SQL, eseguirà l'analisi e visualizzerà i risultati 🏆 ✅ Scarica i dati in **Excel** o visualizza i **grafici generati** 📈
+### ⚙️ Funzionamento
 
-### 2️⃣ Aggiornare la struttura del database 🔄
+1. **Analisi dell'errore SQL**: Se una query generata fallisce, l'errore restituito dal database viene catturato e analizzato.
+2. **Forward dell’errore al LLM**: L'errore viene inoltrato come feedback al modello LLM insieme alla query originale e al contesto.
+3. **Rigenerazione della query**: Il modello tenta di generare una nuova versione corretta della query sulla base dell’errore ricevuto.
+4. **Secondo tentativo automatico**: La query corretta viene eseguita automaticamente senza intervento umano.
 
-Clicca su **"Riscansiona Database"** nel frontend per aggiornare: ✅ Tabelle, colonne e chiavi esterne 🔗 ✅ Indici e commenti delle colonne 📌
+### ✅ Vantaggi
 
----
+- Migliore resilienza in ambienti dinamici
+- Riduzione degli errori fatali in fase di runtime
+- Adattabilità a strutture dati complesse e nomi tabella non standard
+- Comportamento trasparente per l’utente finale
 
-## 📂 Struttura della Codebase
-```
-📦 database_crawler_ai
-├── 📄 app.py               # Backend FastAPI per gestione query
-├── 📄 frontend.py          # Interfaccia utente Streamlit
-├── 📄 query_ai.py          # Generazione di query SQL con OpenAI
-├── 📄 query_cache.py       # Gestione cache delle query SQL
-├── 📄 db_schema.py         # Estratto e cache della struttura del database
-├── 📄 database.py          # Configurazione e gestione del database SQLite
-├── 📄 requirements.txt     # Librerie necessarie
-├── 📄 docker-compose.yml   # Configurazione Docker
-└── 📄 Dockerfile           # Dockerfile per il backend
-```
+Questa funzionalità è utile sia in ambienti di test che in produzione, dove l’interpretazione automatica degli errori consente al sistema di apprendere iterativamente.
 
----
-
-## 🛠️ API Endpoints
-
-📡 L'API backend espone i seguenti endpoint:
-
-### 🔍 **Genera ed esegui query SQL**
-
-```http
-POST /query
-```
-
-**Request JSON:**
-
-```json
-{
-  "domanda": "Mostrami il totale delle vendite per categoria",
-  "openai_api_key": "tuo_openai_api_key",
-  "ssh_config": {
-    "ssh_host": "10.11.11.4",
-    "ssh_user": "tuo_utente_ssh",
-    "ssh_key": "~/.ssh/id_rsa"
-  },
-  "db_config": {
-    "host": "127.0.0.1",
-    "port": "5432",
-    "user": "admin",
-    "password": "admin",
-    "database": "vendite"
-  },
-  "force_no_cache": false
-}
-```
-
-### 🔄 **Aggiorna la struttura del database**
-
-```http
-POST /refresh_schema
-```
 
 ## 🚀 Gestione della Cache
-### 1️⃣ **Cache delle Query SQL**  
+### 1️⃣ **Cache delle Query SQL**
 Il sistema salva le query SQL generate dall'AI in **SQLite**, riducendo il numero di chiamate a OpenAI.
 - **Matching con AI**: Le nuove domande vengono confrontate con quelle già esistenti tramite il modello **SentenceTransformers**.
 - **Indice FAISS**: Accelera la ricerca delle domande più simili.
@@ -128,38 +131,7 @@ Per evitare di interrogare il database a ogni richiesta, la struttura viene **sa
 - Il sistema rigenera l'hash della struttura e invalida la cache.
 - Le query salvate vengono ignorate se non sono più coerenti con il database attuale.
 
----
+## 🧪 Testing
 
-## 🛠️ Troubleshooting
-
-### ❌ **Errore di connessione al database**
-
-✅ Verifica che il tunnel SSH sia attivo con:
-
-```bash
-ssh -i ~/.ssh/id_rsa tuo_utente_ssh@10.11.11.4
-```
-
-✅ Controlla che le credenziali PostgreSQL siano corrette
-
-### ❌ **Errore OpenAI (modello non disponibile)**
-
-✅ Assicurati di usare un modello valido, es: `gpt-4o-mini`
-
----
-
-## 🚀 Contribuire
-
-Se vuoi migliorare il progetto:
-
-1. Fai un **fork** di questo repository
-2. Crea un **branch** con la tua modifica: `git checkout -b mia-modifica`
-3. Fai un **commit**: `git commit -m "Aggiunto supporto per XYZ"`
-4. Manda una **Pull Request** 🚀
-
----
-
-## 📝 Licenza
-
-Distribuito sotto licenza **MIT**. Sentiti libero di usare e migliorare questo progetto! 😊
+L’infrastruttura di test non è ancora inclusa. Puoi comunque testare i moduli con `pytest` o strumenti simili. Per debugging, consulta `pandasai.log`.
 
