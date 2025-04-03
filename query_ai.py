@@ -424,6 +424,7 @@ def process_query_results(engine, sql_query, domanda, llm_config):
         # ✅ Generiamo il codice per il grafico, includendo gli hint
         plot_code = generate_plot_code_with_gpt(df, llm_config)
 
+        path_grafico = ""
         if plot_code:
             path_grafico = execute_generated_plot_code(plot_code)  # ✅ Eseguiamo il codice per generare il grafico
 
