@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Costanti dell'applicazione
-APP_TITLE = "Analisi AI Database"
+APP_TITLE = "L’AI che lavora per la tua lavanderia industriale"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "/app/credentials.json")
 
@@ -32,6 +32,8 @@ DOMANDE_SUGGERITE = {
         "Qual'è l'impianto di confezionamento che produce più quintail? fai una comparazione tra quelli presenti valutando le medie produttive degil ultimi 6 mesi",
         "Come si distribuiscono i prodotti per impianto di confezionamento?",
         "Qual'è la media oraria di produzione per impianto di confezionamento?",
+        "Fai un'analisi sui picchi orari gionnalieri di produzione per giorno della settimana ed impianto di confezionamento",
+        "Qual'è la media pacchi minuto di produzione per impianto di confezionamento degli ultimi 12 mesi?"
     ],
     "jit40": [
         "Mostrami l'andamento del fatturato dell'ultimo anno per categoria",
@@ -53,6 +55,16 @@ LLM_PROVIDERS = {
 
 # temp
 st.session_state.logged_in = True
+
+st.set_page_config(
+    page_title="JIT40 Laundry Bot",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'About': APP_TITLE
+    }
+)
 
 
 class AuthManager:
@@ -573,7 +585,16 @@ class UserInterface:
 
     def render_main_interface(self):
         """Visualizza l'interfaccia principale dell'applicazione."""
-        st.title(APP_TITLE)
+
+        # Aggiungi il logo sopra il titolo
+        cola, colb = st.columns([1, 1])
+        with cola:
+            st.image("laundrybot_jit40.png", width=400)
+        with colb:
+            st.header(APP_TITLE)
+
+        st.write("")
+        st.write("")
 
         # Creiamo i tabs per le diverse sezioni
         tab1, tab2, tab3 = st.tabs(["📊 Analisi Dati", "✏️ Hint Interpretazione", "⚙️ Configurazioni"])

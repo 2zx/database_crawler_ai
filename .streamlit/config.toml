@@ -1,0 +1,5 @@
+[theme]
+base = "light"
+primaryColor = "#3CB371"  # Verde per mantenere l'identità visiva
+secondaryBackgroundColor = "#f0f2f6"  # Grigio chiaro per la sidebar
+textColor = "#262730"  # Testo scuro per contrasto
