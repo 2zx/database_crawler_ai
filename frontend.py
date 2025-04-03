@@ -193,6 +193,19 @@ class HintManager:
         """Inizializza il gestore degli hint."""
         self.backend_url = backend_url
 
+    def get_hint_by_id(self, hint_id):
+        """Recupera un hint specifico tramite il suo ID."""
+        try:
+            response = requests.get(f"{self.backend_url}/hints/{hint_id}")
+            if response.status_code == 200:
+                return response.json()
+            else:
+                st.warning(f"Errore nel recupero dell'hint con ID {hint_id}: {response.text}")
+                return None
+        except Exception as e:
+            st.warning(f"Errore nel recupero dell'hint: {e}")
+            return None
+
     def get_all_hints(self):
         """Recupera tutti gli hint dal backend."""
         try:
@@ -286,17 +299,50 @@ class HintManager:
             st.warning(f"Errore nel cambio di stato dell'hint: {e}")
             return False
 
-    def get_hint_categories(self):
-        """Recupera le categorie di hint suggerite."""
+    def get_all_categories(self):
+        """Recupera tutte le categorie dal backend."""
         try:
-            response = requests.get(f"{self.backend_url}/hints/categories")
+            response = requests.get(f"{self.backend_url}/categories")
             if response.status_code == 200:
-                return response.json().get("categories", ["generale"])
+                return response.json().get("categories", [])
             else:
-                return ["generale"]
+                st.warning("Non è stato possibile recuperare le categorie.")
+                return []
         except Exception as e:
             st.warning(f"Errore nel recupero delle categorie: {e}")
-            return ["generale"]
+            return []
+
+    def add_category(self, category_name):
+        """Aggiunge una nuova categoria."""
+        try:
+            response = requests.post(
+                f"{self.backend_url}/categories",
+                json={"name": category_name}
+            )
+            if response.status_code == 200:
+                return True
+            else:
+                st.warning(f"Errore nell'aggiunta della categoria: {response.text}")
+                return False
+        except Exception as e:
+            st.warning(f"Errore nell'aggiunta della categoria: {e}")
+            return False
+
+    def delete_category(self, category_name, replace_with="generale"):
+        """Elimina una categoria."""
+        try:
+            response = requests.delete(
+                f"{self.backend_url}/categories",
+                json={"name": category_name, "replace_with": replace_with}
+            )
+            if response.status_code == 200:
+                return True
+            else:
+                st.warning(f"Errore nell'eliminazione della categoria: {response.text}")
+                return False
+        except Exception as e:
+            st.warning(f"Errore nell'eliminazione della categoria: {e}")
+            return False
 
     def export_hints(self):
         """Esporta gli hint in un file JSON."""
@@ -680,7 +726,7 @@ class UserInterface:
                 hint_text = st.text_area("Testo dell'hint", key="hint_text_input")
 
                 # Ottieni le categorie dal backend
-                hint_categories = self.hint_manager.get_hint_categories()
+                hint_categories = self.hint_manager.get_all_categories()
                 hint_category = st.selectbox("Categoria", hint_categories, key="hint_category_select")
 
                 submit_button = st.form_submit_button("✅ Aggiungi hint")
@@ -692,6 +738,77 @@ class UserInterface:
                         st.rerun()
                     else:
                         st.error("❌ Errore nell'aggiunta dell'hint")
+
+            # Sezione per la gestione delle categorie
+            st.subheader("Gestione Categorie")
+            categories_col1, categories_col2 = st.columns([1, 1])
+
+            with categories_col1:
+                # Form per aggiungere una categoria
+                with st.form(key="add_category_form"):
+                    new_category = st.text_input("Nome nuova categoria", key="new_category_input")
+                    add_category_button = st.form_submit_button("➕ Aggiungi Categoria")
+
+                    if add_category_button and new_category:
+                        success = self.hint_manager.add_category(new_category)
+                        if success:
+                            st.success(f"✅ Categoria '{new_category}' aggiunta con successo!")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ La categoria '{new_category}' esiste già o si è verificato un errore")
+
+            with categories_col2:
+                # Form per eliminare una categoria
+                with st.form(key="delete_category_form"):
+                    # Ottieni le categorie disponibili
+                    available_categories = self.hint_manager.get_all_categories()
+
+                    # Filtra la categoria "generale" che non può essere eliminata
+                    delete_options = [cat for cat in available_categories if cat != "generale"]
+
+                    if not delete_options:
+                        st.info("Non ci sono categorie che possono essere eliminate.")
+                        st.form_submit_button("🗑️ Elimina Categoria", disabled=True)
+                    else:
+                        category_to_delete = st.selectbox(
+                            "Categoria da eliminare",
+                            options=delete_options,
+                            key="category_to_delete"
+                        )
+
+                        # Opzioni per la sostituzione (tutte le categorie tranne quella da eliminare)
+                        replacement_options = [cat for cat in available_categories if cat != category_to_delete]
+                        replacement_category = st.selectbox(
+                            "Sostituisci con",
+                            options=replacement_options,
+                            index=0,  # Default alla prima opzione (probabilmente "generale")
+                            key="replacement_category"
+                        )
+
+                        delete_button = st.form_submit_button("🗑️ Elimina Categoria")
+
+                        if delete_button and category_to_delete:
+                            success = self.hint_manager.delete_category(category_to_delete, replacement_category)
+                            if success:
+                                st.success(f"✅ Categoria '{category_to_delete}' eliminata con successo!")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Errore nell'eliminazione della categoria '{category_to_delete}'")
+
+            # Mostra le categorie esistenti
+            st.subheader("Categorie Disponibili")
+            available_categories = self.hint_manager.get_all_categories()
+            if available_categories:
+                # Visualizza le categorie in una griglia di chip
+                categories_html = ""
+                for category in available_categories:
+                    categories_html += f'<span style="background-color:#f0f2f6;padding:5px 10px;margin:5px;border-radius:15px;display:inline-block">{category}</span>'
+
+                st.markdown(categories_html, unsafe_allow_html=True)
+            else:
+                st.info("Nessuna categoria disponibile.")
+
+            st.markdown("---")  # Separatore visivo
 
             # Tabella per visualizzare e gestire gli hint esistenti
             st.subheader("Hint esistenti")
@@ -711,50 +828,143 @@ class UserInterface:
                 # Form per modificare o eliminare un hint
                 st.subheader("Gestione degli hint esistenti")
 
+                # Utilizziamo session_state per tenere traccia dell'hint selezionato
+                if "selected_hint_id" not in st.session_state:
+                    st.session_state.selected_hint_id = 0
+                if "selected_hint_data" not in st.session_state:
+                    st.session_state.selected_hint_data = None
+                if "hint_action" not in st.session_state:
+                    st.session_state.hint_action = "Modifica"
+
+                # Funzione per caricare i dati dell'hint quando cambia l'ID
+                def load_hint_data():
+                    hint_id = st.session_state.hint_id_edit
+                    if hint_id > 0:
+                        hint_data = self.hint_manager.get_hint_by_id(hint_id)
+                        if hint_data:
+                            st.session_state.selected_hint_data = hint_data
+                            st.session_state.selected_hint_id = hint_id
+                        else:
+                            st.warning(f"Hint con ID {hint_id} non trovato.")
+                            st.session_state.selected_hint_data = None
+                    else:
+                        st.session_state.selected_hint_data = None
+
+                # Contenitore per il feedback
+                feedback_container = st.empty()
+
+                col1, col2 = st.columns([1, 3])
+
+                with col1:
+                    # Utilizziamo key esplicite per evitare conflitti
+                    hint_id_to_edit = st.number_input(
+                        "ID Hint",
+                        min_value=1,
+                        step=1,
+                        key="hint_id_edit",
+                        on_change=load_hint_data
+                    )
+
+                with col2:
+                    action = st.radio(
+                        "Azione",
+                        ["Modifica", "Attiva/Disattiva", "Elimina"],
+                        key="hint_action",
+                        on_change=lambda: setattr(st.session_state, 'hint_action', st.session_state.hint_action)
+                    )
+
+                # Mostriamo un'anteprima dell'hint selezionato
+                if st.session_state.selected_hint_data:
+                    hint_data = st.session_state.selected_hint_data
+
+                    # Usiamo un expander per non prendere troppo spazio
+                    with st.expander("Anteprima hint selezionato", expanded=True):
+                        st.markdown(f"""
+                        **ID**: {hint_data['id']}
+                        **Categoria**: {hint_data['hint_category']}
+                        **Stato**: {'✅ Attivo' if hint_data['active'] else '❌ Disattivato'}
+                        **Testo**: {hint_data['hint_text']}
+                        """)
+
+                # Mostriamo campi differenti in base all'azione selezionata
                 with st.form(key="edit_hint_form"):
-                    col1, col2 = st.columns([1, 3])
-
-                    with col1:
-                        # Utilizziamo key esplicite per evitare conflitti
-                        hint_id_to_edit = st.number_input("ID Hint", min_value=1, step=1, key="hint_id_edit")
-
-                    with col2:
-                        action = st.radio("Azione", ["Modifica", "Attiva/Disattiva", "Elimina"], key="hint_action")
-
-                    # Mostriamo campi differenti in base all'azione selezionata
                     if action == "Modifica":
-                        new_hint_text = st.text_area("Nuovo testo", key="new_hint_text")
-                        new_hint_category = st.selectbox("Nuova categoria", hint_categories, key="new_hint_category")
+                        # Preriempiamo i campi con i dati dell'hint selezionato
+                        default_text = ""
+                        default_category = ""
+
+                        if st.session_state.selected_hint_data:
+                            default_text = st.session_state.selected_hint_data["hint_text"]
+                            default_category = st.session_state.selected_hint_data["hint_category"]
+
+                        new_hint_text = st.text_area("Nuovo testo", key="new_hint_text", value=default_text)
+
+                        # Ottieni le categorie disponibili
+                        available_categories = self.hint_manager.get_all_categories()
+
+                        # Trova l'indice della categoria corrente
+                        default_category_index = 0
+                        if default_category in available_categories:
+                            default_category_index = available_categories.index(default_category)
+
+                        new_hint_category = st.selectbox(
+                            "Nuova categoria",
+                            available_categories,
+                            index=default_category_index,
+                            key="new_hint_category"
+                        )
 
                         update_button = st.form_submit_button("📝 Aggiorna hint")
 
-                        if update_button:
+                        if update_button and hint_id_to_edit > 0:
                             if self.hint_manager.update_hint(hint_id_to_edit, new_hint_text, new_hint_category):
-                                st.success(f"✅ Hint {hint_id_to_edit} aggiornato con successo!")
-                                st.rerun()
+                                feedback_container.success(f"✅ Hint {hint_id_to_edit} aggiornato con successo!")
+                                # Ricarica i dati dell'hint
+                                load_hint_data()
                             else:
-                                st.error(f"❌ Errore nell'aggiornamento dell'hint {hint_id_to_edit}")
+                                feedback_container.error(f"❌ Errore nell'aggiornamento dell'hint {hint_id_to_edit}")
 
                     elif action == "Attiva/Disattiva":
+                        # Mostriamo lo stato attuale dell'hint
+                        current_status = ""
+                        if st.session_state.selected_hint_data:
+                            is_active = st.session_state.selected_hint_data["active"]
+                            current_status = "✅ Attivo" if is_active else "❌ Disattivato"
+                            st.write(f"Stato attuale: {current_status}")
+                            st.write(f"Nuovo stato dopo il toggle: {'❌ Disattivato' if is_active else '✅ Attivo'}")
+
                         toggle_button = st.form_submit_button("🔄 Attiva/Disattiva hint")
 
-                        if toggle_button:
+                        if toggle_button and hint_id_to_edit > 0:
                             if self.hint_manager.toggle_hint_status(hint_id_to_edit):
-                                st.success(f"✅ Stato dell'hint {hint_id_to_edit} modificato con successo!")
-                                st.rerun()
+                                feedback_container.success(f"✅ Stato dell'hint {hint_id_to_edit} modificato con successo!")
+                                # Ricarica i dati dell'hint
+                                load_hint_data()
                             else:
-                                st.error(f"❌ Errore nella modifica dello stato dell'hint {hint_id_to_edit}")
+                                feedback_container.error(f"❌ Errore nella modifica dello stato dell'hint {hint_id_to_edit}")
 
                     elif action == "Elimina":
-                        st.warning("⚠️ Questa operazione eliminerà definitivamente l'hint selezionato.")
+                        if st.session_state.selected_hint_data:
+                            st.warning(f"""
+                            ⚠️ Stai per eliminare definitivamente questo hint:
+
+                            **ID**: {st.session_state.selected_hint_data['id']}
+                            **Categoria**: {st.session_state.selected_hint_data['hint_category']}
+                            **Testo**: {st.session_state.selected_hint_data['hint_text']}
+                            """)
+                        else:
+                            st.warning("⚠️ Seleziona un hint da eliminare.")
+
                         delete_button = st.form_submit_button("🗑️ Elimina hint")
 
-                        if delete_button:
+                        if delete_button and hint_id_to_edit > 0:
                             if self.hint_manager.delete_hint(hint_id_to_edit):
-                                st.success(f"✅ Hint {hint_id_to_edit} eliminato con successo!")
-                                st.rerun()
+                                feedback_container.success(f"✅ Hint {hint_id_to_edit} eliminato con successo!")
+                                # Resetta lo stato
+                                st.session_state.selected_hint_data = None
+                                st.session_state.selected_hint_id = 0
                             else:
-                                st.error(f"❌ Errore nell'eliminazione dell'hint {hint_id_to_edit}")
+                                feedback_container.error(f"❌ Errore nell'eliminazione dell'hint {hint_id_to_edit}")
 
 
 class BackendClient:

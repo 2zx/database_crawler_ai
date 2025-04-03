@@ -51,6 +51,7 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
 
     # Adatta il prompt in base al tipo di database
     db_type_desc = "PostgreSQL" if db_type == "postgresql" else "Microsoft SQL Server"
+    primary_key_id_hint = "Nota: tutte le tabelle hanno una chiave primaria denominata 'id'." if db_type == "postgresql" else ""
 
     # Aggiungi eventuali differenze sintattiche specifiche per SQL Server
     syntax_notes = ""
@@ -67,8 +68,8 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
 
     prompt_sql = f"""
     Sei un esperto di database SQL. Ti verrà fornita la struttura di un database {db_type_desc},
-    comprensivo di tabelle, colonne, chiavi primarie e commenti,
-    considera che tutte le tabelle hanno una primary_key denominata id.
+    comprensivo di tabelle, colonne, chiavi primarie e commenti.
+    {primary_key_id_hint}
     Riceverai una domanda posta da un utente in linguaggio naturale.
     Dovrai generare una query SQL che risponda alla domanda dell'utente restituendo **solo**
     la query SQL necessaria per ottenere la risposta senza alcuna spiegazione o testo aggiuntivo.
@@ -80,7 +81,7 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
     **Domanda dell'utente:**
     "{domanda}"
 
-    Verifica che la query sia sintatticamente corretta per {db_type_desc} e coerente con la struttura del database.
+    Verifica che la query sia sintatticamente corretta per {db_type_desc}.
     Non generare mai valori inventati.
     """
 
@@ -312,7 +313,7 @@ def try_query_execution(db_type, cached_query, connection):
     elif db_type == 'sqlserver':
         connection.execute(text("SET SHOWPLAN_ALL ON;"))
         connection.execute(text(cached_query))
-        connection.execute(("SET SHOWPLAN_ALL OFF;"))
+        connection.execute(text("SET SHOWPLAN_ALL OFF;"))
     else:
         raise ValueError(f"Tipo di database non supportato: {db_type}")
 
@@ -410,17 +411,16 @@ def process_query_results(engine, sql_query, domanda, llm_config):
             llm_instance = get_llm_instance(provider, llm_config)
 
             # Prepariamo un prompt per l'analisi dei dati con hint
-            data_sample = df.head(10).to_string()
+            data_sample = df.head(50).to_string()
             analysis_prompt = f"""
             **Domanda dell'utente**
             "{domanda}"
 
-            **Dati recuperati dal database (primi 10 record):**
+            **Dati recuperati dal database (primi 50 record):**
             {data_sample}
 
             **Statistiche dei dati:**
             {df.describe().to_string()}
-            {hints_section}
 
             Sulla base della domanda, dei dati forniti e delle istruzioni sull'interpretazione dei dati,
             descrivi in modo chiaro e utile i risultati.
@@ -432,7 +432,7 @@ def process_query_results(engine, sql_query, domanda, llm_config):
             risposta = llm_instance.generate_analysis(analysis_prompt)
 
         # ✅ Generiamo il codice per il grafico, includendo gli hint
-        plot_code = generate_plot_code_with_gpt(df, llm_config)
+        plot_code = generate_plot_code(df, llm_config)
 
         path_grafico = ""
         if plot_code:
@@ -466,7 +466,7 @@ def process_query_results(engine, sql_query, domanda, llm_config):
         }
 
 
-def generate_plot_code_with_gpt(df, llm_config):
+def generate_plot_code(df, llm_config):
     """
     Chiede all'AI di generare codice Matplotlib basato sui dati.
     """
@@ -475,16 +475,14 @@ def generate_plot_code_with_gpt(df, llm_config):
     hints_section = f"\n\n{formatted_hints}\n" if formatted_hints else ""
 
     prompt = f"""
-    Genera un grafico Matplotlib per visualizzare i seguenti dati:
+    Genera più grafici Matplotlib identificando multipli KPI per visualizzare i seguenti dati:
     {df.head().to_string()}
-
-    {hints_section}
 
     Il codice deve:
     - Usare plt.plot(), plt.bar() o plt.scatter() in base ai dati.
-    - Aggiungere titolo, assi e griglia.
-    - Salvare l'immagine in '{CHARTS_DIR}/generated_plot.png'.
-    - Non mostrare il grafico (plt.show()).
+    - Aggiungere titolo, assi e griglia per ogni grafico.
+    - Salvare il tutto in una sola immagine in '{CHARTS_DIR}/generated_plot.png'.
+    - Non mostrare i grafici (plt.show()).
     - Tenere in considerazione le istruzioni per l'interpretazione dei dati.
 
     Ritorna SOLO il codice Python, senza commenti o altro.

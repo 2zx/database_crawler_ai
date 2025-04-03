@@ -13,7 +13,8 @@ from database import create_db
 from hint_manager import (
     add_hint, update_hint, delete_hint, toggle_hint_status,
     get_all_hints, get_active_hints, get_hint_by_id,
-    format_hints_for_prompt, export_hints_to_json, import_hints_from_json
+    format_hints_for_prompt, export_hints_to_json, import_hints_from_json,
+    get_all_categories, add_category, delete_category
 )
 from typing import Optional
 import uuid
@@ -76,6 +77,15 @@ class HintUpdateRequest(BaseModel):
     hint_text: Optional[str] = None
     hint_category: Optional[str] = None
     active: Optional[int] = None
+
+
+class CategoryRequest(BaseModel):
+    name: str
+
+
+class CategoryDeleteRequest(BaseModel):
+    name: str
+    replace_with: str = "generale"
 
 
 def create_ssh_tunnel(ssh_host, ssh_user, ssh_key, db_host, db_port, db_type="postgresql"):
@@ -252,16 +262,34 @@ def import_hints():
     raise HTTPException(status_code=500, detail="Errore nell'importazione degli hint")
 
 
-@app.get("/hints/categories")
-def get_hint_categories():
-    """
-    Restituisce le categorie di hint suggerite.
-    Queste categorie includono "generale" e opzioni basate sulla struttura del database.
-    """
-    # Otteniamo le categorie predefinite
-    categories = ["generale"]
-
+@app.get("/categories")
+def get_categories():
+    """Recupera tutte le categorie disponibili."""
+    categories = get_all_categories()
     return {"categories": categories}
+
+
+@app.post("/categories")
+def create_category(request: CategoryRequest):
+    """Crea una nuova categoria."""
+    success = add_category(request.name)
+    if success:
+        return {"status": "success", "message": f"Categoria '{request.name}' creata"}
+    else:
+        raise HTTPException(status_code=400, detail=f"La categoria '{request.name}' esiste già")
+
+
+@app.delete("/categories")
+def remove_category(request: CategoryDeleteRequest):
+    """Elimina una categoria e aggiorna gli hint associati."""
+    if request.name == "generale":
+        raise HTTPException(status_code=400, detail="Non è possibile eliminare la categoria 'generale'")
+
+    affected_rows = delete_category(request.name, request.replace_with)
+    if affected_rows >= 0:
+        return {"status": "success", "affected_rows": affected_rows}
+    else:
+        raise HTTPException(status_code=500, detail="Errore nell'eliminazione della categoria")
 
 
 @app.post("/query")
@@ -388,8 +416,6 @@ async def process_query_in_background(query_id, request_data):
                 })
         )
 
-        logger.info(f"📝 Query SQL generata dall'AI dopo {attempts} tentativi: {sql_query}")
-
         if cache_used:
             logger.info("✅ Query recuperata dalla cache")
             # Aggiorna lo stato: query dalla cache
@@ -401,7 +427,7 @@ async def process_query_in_background(query_id, request_data):
                 "cache_used": True
             })
         else:
-            logger.info("📝 Nuova query generata")
+            logger.info("📝 Nuova query generata dall'AI dopo {attempts} tentativi: {sql_query}")
             # Aggiorna lo stato: query generata nuova
             query_progress[query_id].update({
                 "status": "new_query",

@@ -34,6 +34,20 @@ class DataHint(Base):
         return f"<DataHint(id='{self.id}', category='{self.hint_category}', text='{self.hint_text[:30]}...')>"
 
 
+class HintCategory(Base):
+    """Modello per la tabella delle categorie di hint."""
+    __tablename__ = "hint_categories"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    db_type = Column(String, nullable=True)  # postgresql, sqlserver, null=tutti
+    created_at = Column(String, default=lambda: datetime.now().isoformat())
+
+    def __repr__(self):
+        return f"<HintCategory(id='{self.id}', name='{self.name}')>"
+
+
 # Inizializzazione del database
 engine = create_engine(HINT_DB_URL)
 Base.metadata.create_all(engine)
@@ -349,3 +363,127 @@ def import_hints_from_json():
     except Exception as e:
         logger.error(f"❌ Errore nell'importazione degli hint: {e}")
         return False
+
+
+def get_all_categories():
+    """
+    Recupera tutte le categorie salvate nel database.
+
+    Returns:
+        list: Lista di tutte le categorie
+    """
+    try:
+        session = Session()
+        categories = session.query(HintCategory).all()
+        session.close()
+
+        # Aggiungi "generale" se non esiste
+        category_names = [category.name for category in categories]
+        if "generale" not in category_names and categories:
+            # Aggiungi "generale" all'inizio della lista
+            return ["generale"] + category_names
+
+        return category_names if categories else ["generale"]
+    except Exception as e:
+        logger.error(f"❌ Errore nel recupero delle categorie: {e}")
+        return ["generale"]  # Ritorna almeno la categoria default
+
+
+def add_category(category_name, description="", db_type=None):
+    """
+    Aggiunge una nuova categoria al database.
+
+    Args:
+        category_name (str): Nome della nuova categoria
+        description (str): Descrizione della categoria
+        db_type (str): Tipo di database associato (postgresql, sqlserver, None=tutti)
+
+    Returns:
+        bool: True se l'aggiunta è riuscita, False se la categoria esiste già
+    """
+    try:
+        session = Session()
+
+        # Verifica se la categoria esiste già
+        existing = session.query(HintCategory).filter_by(name=category_name).first()
+        if existing:
+            session.close()
+            logger.warning(f"⚠️ La categoria '{category_name}' esiste già")
+            return False
+
+        # Crea la nuova categoria
+        new_category = HintCategory(
+            name=category_name,
+            description=description,
+            db_type=db_type
+        )
+
+        session.add(new_category)
+        session.commit()
+        session.close()
+
+        logger.info(f"✅ Aggiunta nuova categoria: {category_name}")
+        return True
+    except Exception as e:
+        if 'session' in locals():
+            session.rollback()
+            session.close()
+        logger.error(f"❌ Errore nell'aggiunta della categoria: {e}")
+        return False
+
+
+def delete_category(category_name, replace_with="generale"):
+    """
+    Elimina una categoria e aggiorna tutti gli hint associati.
+
+    Args:
+        category_name (str): Nome della categoria da eliminare
+        replace_with (str): Nome della categoria con cui sostituire
+
+    Returns:
+        int: Numero di hint aggiornati, o -1 in caso di errore
+    """
+    try:
+        # Non permettiamo di eliminare la categoria "generale"
+        if category_name == "generale":
+            logger.warning("⚠️ Non è possibile eliminare la categoria 'generale'")
+            return 0
+
+        session = Session()
+
+        # Verifica che la categoria esista
+        category = session.query(HintCategory).filter_by(name=category_name).first()
+        if not category:
+            session.close()
+            logger.warning(f"⚠️ Categoria '{category_name}' non trovata")
+            return 0
+
+        # Verifica che la categoria di sostituzione esista
+        if replace_with != "generale":
+            replacement = session.query(HintCategory).filter_by(name=replace_with).first()
+            if not replacement:
+                session.close()
+                logger.warning(f"⚠️ Categoria di sostituzione '{replace_with}' non trovata")
+                return -1
+
+        # Aggiorna gli hint che usano questa categoria
+        affected_rows = session.query(DataHint).filter_by(hint_category=category_name).update(
+            {"hint_category": replace_with}
+        )
+
+        # Elimina la categoria
+        session.delete(category)
+
+        session.commit()
+        session.close()
+
+        logger.info(f"✅ Eliminata categoria '{category_name}', {affected_rows} hint aggiornati")
+        return affected_rows
+    except Exception as e:
+        if 'session' in locals():
+            session.rollback()
+            session.close()
+        logger.error(f"❌ Errore nell'eliminazione della categoria: {e}")
+        return -1
+
+
