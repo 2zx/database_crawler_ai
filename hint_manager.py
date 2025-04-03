@@ -207,7 +207,7 @@ def get_all_hints():
         return []
 
 
-def get_active_hints():
+def get_active_hints(filter_hint_category=None):
     """
     Recupera solo gli hint attivi dal database.
 
@@ -228,7 +228,7 @@ def get_active_hints():
                 "hint_category": hint.hint_category,
                 "active": hint.active
             }
-            for hint in hints
+            for hint in hints if (filter_hint_category is None or hint.hint_category in [filter_hint_category, "generale"])
         ]
     except Exception as e:
         logger.error(f"❌ Errore nel recupero degli hint attivi: {e}")
@@ -266,14 +266,14 @@ def get_hint_by_id(hint_id):
         return None
 
 
-def format_hints_for_prompt():
+def format_hints_for_prompt(filter_category):
     """
     Formatta tutti gli hint attivi per l'inclusione nel prompt.
 
     Returns:
         str: Gli hint formattati pronti per essere inseriti nel prompt
     """
-    active_hints = get_active_hints()
+    active_hints = get_active_hints(filter_category)
 
     if not active_hints:
         return ""
@@ -282,6 +282,7 @@ def format_hints_for_prompt():
     hints_by_category = {}
     for hint in active_hints:
         category = hint["hint_category"]
+
         if category not in hints_by_category:
             hints_by_category[category] = []
         hints_by_category[category].append(hint["hint_text"])
@@ -485,5 +486,3 @@ def delete_category(category_name, replace_with="generale"):
             session.close()
         logger.error(f"❌ Errore nell'eliminazione della categoria: {e}")
         return -1
-
-

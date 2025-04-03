@@ -46,6 +46,7 @@ class DBConfig(BaseModel):
     password: str
     database: str
     db_type: str = "postgresql"  # postgresql o sqlserver
+    hint_category: str = "generale"
 
 
 class LLMConfig(BaseModel):
@@ -182,9 +183,9 @@ def get_hints():
 
 
 @app.get("/hints/active")
-def get_hints_active():
+def get_hints_active(hint_category: str = ""):
     """Recupera solo gli hint attivi."""
-    return get_active_hints()
+    return get_active_hints(hint_category)
 
 
 @app.get("/hints/{hint_id}")
@@ -406,6 +407,7 @@ async def process_query_in_background(query_id, request_data):
             llm_config,
             use_cache,
             engine,
+            request_data.db_config.hint_category,
             5,
             progress_callback=lambda status, message, step, progress:
                 query_progress[query_id].update({
@@ -427,7 +429,7 @@ async def process_query_in_background(query_id, request_data):
                 "cache_used": True
             })
         else:
-            logger.info("📝 Nuova query generata dall'AI dopo {attempts} tentativi: {sql_query}")
+            logger.info(f"📝 Nuova query generata dall'AI dopo {attempts} tentativi: {sql_query}")
             # Aggiorna lo stato: query generata nuova
             query_progress[query_id].update({
                 "status": "new_query",
@@ -510,9 +512,12 @@ def get_available_models():
             {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "description": "Buon rapporto qualità-prezzo"}
         ],
         "claude": [
-            {"id": "claude-3.5-haiku-20241022", "name": "Claude 3.5 Haiku", "description": "Modello veloce ed economico"},
-            {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "description": "Bilanciato per performance e costo"},
-            {"id": "claude-3.7-sonnet-20250224", "name": "Claude 3.7 Sonnet", "description": "Modello più potente"}
+            {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku",
+             "description": "Modello veloce ed economico"},
+            {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet",
+             "description": "Bilanciato per performance e costo"},
+            {"id": "claude-3-7-sonnet-20250224", "name": "Claude 3.7 Sonnet",
+             "description": "Modello più potente"}
         ],
         "deepseek": [
             {"id": "deepseek-chat", "name": "DeepSeek Chat", "description": "Modello di chat generale"},

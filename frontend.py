@@ -27,13 +27,20 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "/app/credentials.json")
 
 # Domande predefinite
-DOMANDE_SUGGERITE = [
-    "Mostrami il totale delle vendite per categoria",
-    "Qual è stato il prodotto più venduto negli ultimi 6 mesi?",
-    "Qual è la media dei prezzi unitari per categoria?",
-    "Quanti articoli sono stati venduti per ciascuna categoria?",
-    "Mostrami l'andamento delle vendite negli ultimi 12 mesi"
-]
+DOMANDE_SUGGERITE = {
+    "montanari": [
+        "Qual'è l'impianto di confezionamento che produce più quintail? fai una comparazione tra quelli presenti valutando le medie produttive degil ultimi 6 mesi",
+        "Come si distribuiscono i prodotti per impianto di confezionamento?",
+        "Qual'è la media oraria di produzione per impianto di confezionamento?",
+    ],
+    "jit40": [
+        "Mostrami l'andamento del fatturato dell'ultimo anno per categoria",
+        "Qual è stato il prodotto più consegnato negli ultimi 6 mesi?",
+        "Qual è la media dei prezzi unitari per categoria?",
+        "Qual'è, in quintali, il bollettato medio settimanale per ciascuna categoria?",
+    ]
+}
+
 
 # Configurazione dei provider LLM
 LLM_PROVIDERS = {
@@ -129,7 +136,8 @@ class CredentialsManager:
             "user": self.credentials.get("db_user", ""),
             "password": self.credentials.get("db_password", ""),
             "database": self.credentials.get("db_name", ""),
-            "db_type": self.credentials.get("db_type", "postgresql")
+            "db_type": self.credentials.get("db_type", "postgresql"),
+            "hint_category": self.credentials.get("hint_category", "generale")  # Aggiunto per la categoria hint
         }
 
     def get_llm_config(self):
@@ -219,10 +227,10 @@ class HintManager:
             st.warning(f"Errore nel recupero degli hint: {e}")
             return []
 
-    def get_active_hints(self):
+    def get_active_hints(self, hint_category=""):
         """Recupera solo gli hint attivi dal backend."""
         try:
-            response = requests.get(f"{self.backend_url}/hints/active")
+            response = requests.get(f"{self.backend_url}/hints/active?hint_category={hint_category}")
             if response.status_code == 200:
                 return response.json()
             else:
@@ -527,6 +535,22 @@ class UserInterface:
             value=self.credentials_manager.credentials.get("db_name", "mio_database")
         )
 
+        # Ottieni le categorie disponibili
+        available_categories = self.hint_manager.get_all_categories()
+        current_hint_category = self.credentials_manager.credentials.get("hint_category", "generale")
+
+        # Trova l'indice della categoria corrente
+        default_category_index = 0
+        if current_hint_category in available_categories:
+            default_category_index = available_categories.index(current_hint_category)
+
+        self.credentials_manager.credentials["hint_category"] = st.selectbox(
+            "Categoria hint",
+            available_categories,
+            index=default_category_index,
+            key="config_hint_category"
+        )
+
         if st.button("💾 Salva credenziali"):
             self.credentials_manager.save_credentials()
             st.success("✅ Credenziali salvate con successo!")
@@ -552,7 +576,7 @@ class UserInterface:
         st.title(APP_TITLE)
 
         # Creiamo i tabs per le diverse sezioni
-        tab1, tab2 = st.tabs(["📊 Analisi Dati", "✏️ Hint Interpretazione"])
+        tab1, tab2, tab3 = st.tabs(["📊 Analisi Dati", "✏️ Hint Interpretazione", "⚙️ Configurazioni"])
 
         # Inizializza il valore di ritorno
         action_data = {"action": None}
@@ -563,6 +587,9 @@ class UserInterface:
 
         with tab2:
             self.render_hints_tab()
+
+        with tab3:
+            self.render_config_tab()
 
         # Ritorna il valore solo alla fine, dopo aver renderizzato entrambe le tab
         return action_data
@@ -576,18 +603,29 @@ class UserInterface:
 
         st.info(f"🧠 Utilizzando {provider_name} - {model_name}")
 
+        domande = []
+        filter_hint_categ = self.credentials_manager.credentials.get("hint_category", "")
+        if filter_hint_categ:
+            domande = DOMANDE_SUGGERITE[filter_hint_categ] if filter_hint_categ in DOMANDE_SUGGERITE else []
+
         # Selettore domande
         domanda_selezionata = st.selectbox(
             "Seleziona una domanda",
-            ["Scrivi la tua domanda..."] + DOMANDE_SUGGERITE
+            ["---"] + domande
         )
-        domanda_input = st.text_input("Oppure scrivi una domanda libera:")
+        domanda_input = st.text_area(
+            label="Oppure scrivi una domanda libera",
+            value="",
+            height=200,
+            max_chars=1000,
+            help="Inserisci la tua descrizione qui. Massimo 1000 caratteri."
+        )
 
         # Checkbox per forzare la rigenerazione della query senza cache
         force_no_cache = st.checkbox("Forza rigenerazione query SQL (ignora cache)")
 
         # Mostra gli hint attivi
-        active_hints = self.hint_manager.get_active_hints()
+        active_hints = self.hint_manager.get_active_hints(filter_hint_categ)
         if active_hints:
             with st.expander("📝 Hint attivi per l'interpretazione dei dati", expanded=False):
                 for hint in active_hints:
@@ -719,97 +757,6 @@ class UserInterface:
             - "Le date sono in formato ISO e nel fuso orario UTC+1"
             """)
 
-            # Sezione per aggiungere un nuovo hint
-            st.subheader("Aggiungi nuovo hint")
-
-            with st.form(key="add_hint_form"):
-                hint_text = st.text_area("Testo dell'hint", key="hint_text_input")
-
-                # Ottieni le categorie dal backend
-                hint_categories = self.hint_manager.get_all_categories()
-                hint_category = st.selectbox("Categoria", hint_categories, key="hint_category_select")
-
-                submit_button = st.form_submit_button("✅ Aggiungi hint")
-
-                if submit_button and hint_text:
-                    hint_id = self.hint_manager.add_hint(hint_text, hint_category)
-                    if hint_id:
-                        st.success(f"✅ Hint aggiunto con successo (ID: {hint_id})")
-                        st.rerun()
-                    else:
-                        st.error("❌ Errore nell'aggiunta dell'hint")
-
-            # Sezione per la gestione delle categorie
-            st.subheader("Gestione Categorie")
-            categories_col1, categories_col2 = st.columns([1, 1])
-
-            with categories_col1:
-                # Form per aggiungere una categoria
-                with st.form(key="add_category_form"):
-                    new_category = st.text_input("Nome nuova categoria", key="new_category_input")
-                    add_category_button = st.form_submit_button("➕ Aggiungi Categoria")
-
-                    if add_category_button and new_category:
-                        success = self.hint_manager.add_category(new_category)
-                        if success:
-                            st.success(f"✅ Categoria '{new_category}' aggiunta con successo!")
-                            st.rerun()
-                        else:
-                            st.error(f"❌ La categoria '{new_category}' esiste già o si è verificato un errore")
-
-            with categories_col2:
-                # Form per eliminare una categoria
-                with st.form(key="delete_category_form"):
-                    # Ottieni le categorie disponibili
-                    available_categories = self.hint_manager.get_all_categories()
-
-                    # Filtra la categoria "generale" che non può essere eliminata
-                    delete_options = [cat for cat in available_categories if cat != "generale"]
-
-                    if not delete_options:
-                        st.info("Non ci sono categorie che possono essere eliminate.")
-                        st.form_submit_button("🗑️ Elimina Categoria", disabled=True)
-                    else:
-                        category_to_delete = st.selectbox(
-                            "Categoria da eliminare",
-                            options=delete_options,
-                            key="category_to_delete"
-                        )
-
-                        # Opzioni per la sostituzione (tutte le categorie tranne quella da eliminare)
-                        replacement_options = [cat for cat in available_categories if cat != category_to_delete]
-                        replacement_category = st.selectbox(
-                            "Sostituisci con",
-                            options=replacement_options,
-                            index=0,  # Default alla prima opzione (probabilmente "generale")
-                            key="replacement_category"
-                        )
-
-                        delete_button = st.form_submit_button("🗑️ Elimina Categoria")
-
-                        if delete_button and category_to_delete:
-                            success = self.hint_manager.delete_category(category_to_delete, replacement_category)
-                            if success:
-                                st.success(f"✅ Categoria '{category_to_delete}' eliminata con successo!")
-                                st.rerun()
-                            else:
-                                st.error(f"❌ Errore nell'eliminazione della categoria '{category_to_delete}'")
-
-            # Mostra le categorie esistenti
-            st.subheader("Categorie Disponibili")
-            available_categories = self.hint_manager.get_all_categories()
-            if available_categories:
-                # Visualizza le categorie in una griglia di chip
-                categories_html = ""
-                for category in available_categories:
-                    categories_html += f'<span style="background-color:#f0f2f6;padding:5px 10px;margin:5px;border-radius:15px;display:inline-block">{category}</span>'
-
-                st.markdown(categories_html, unsafe_allow_html=True)
-            else:
-                st.info("Nessuna categoria disponibile.")
-
-            st.markdown("---")  # Separatore visivo
-
             # Tabella per visualizzare e gestire gli hint esistenti
             st.subheader("Hint esistenti")
             hints = self.hint_manager.get_all_hints()
@@ -823,7 +770,7 @@ class UserInterface:
                 df_hints = df_hints[['id', 'hint_category', 'hint_text', 'status']]
                 df_hints.columns = ['ID', 'Categoria', 'Testo', 'Stato']
 
-                st.dataframe(df_hints)
+                st.dataframe(df_hints, hide_index=True)
 
                 # Form per modificare o eliminare un hint
                 st.subheader("Gestione degli hint esistenti")
@@ -859,7 +806,7 @@ class UserInterface:
                     # Utilizziamo key esplicite per evitare conflitti
                     hint_id_to_edit = st.number_input(
                         "ID Hint",
-                        min_value=1,
+                        min_value=0,
                         step=1,
                         key="hint_id_edit",
                         on_change=load_hint_data
@@ -966,6 +913,111 @@ class UserInterface:
                             else:
                                 feedback_container.error(f"❌ Errore nell'eliminazione dell'hint {hint_id_to_edit}")
 
+            # Sezione per aggiungere un nuovo hint
+            st.subheader("Aggiungi nuovo hint")
+
+            with st.form(key="add_hint_form"):
+                hint_text = st.text_area("Testo dell'hint", key="hint_text_input")
+
+                # Ottieni le categorie dal backend
+                hint_categories = self.hint_manager.get_all_categories()
+                hint_category = st.selectbox("Categoria", hint_categories, key="hint_category_select")
+
+                submit_button = st.form_submit_button("✅ Aggiungi hint")
+
+                if submit_button and hint_text:
+                    hint_id = self.hint_manager.add_hint(hint_text, hint_category)
+                    if hint_id:
+                        st.success(f"✅ Hint aggiunto con successo (ID: {hint_id})")
+                        st.rerun()
+                    else:
+                        st.error("❌ Errore nell'aggiunta dell'hint")
+
+    def render_config_tab(self):
+        """Visualizza la tab di gestione configurazioni hint."""
+
+        # Assicuriamoci che il contenuto sia visibile
+        st.header("✏️ Configurazioni")
+
+        # Aggiungiamo un container per garantire che il contenuto sia visibile
+        config_container = st.container()
+
+        with config_container:
+
+            # Sezione per la gestione delle categorie
+            st.subheader("Gestione Categorie")
+            categories_col1, categories_col2 = st.columns([1, 1])
+
+            with categories_col1:
+                # Form per aggiungere una categoria
+                with st.form(key="add_category_form"):
+                    new_category = st.text_input("Nome nuova categoria", key="new_category_input")
+                    add_category_button = st.form_submit_button("➕ Aggiungi Categoria")
+
+                    if add_category_button and new_category:
+                        success = self.hint_manager.add_category(new_category)
+                        if success:
+                            st.success(f"✅ Categoria '{new_category}' aggiunta con successo!")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ La categoria '{new_category}' esiste già o si è verificato un errore")
+
+            with categories_col2:
+                # Form per eliminare una categoria
+                with st.form(key="delete_category_form"):
+                    # Ottieni le categorie disponibili
+                    available_categories = self.hint_manager.get_all_categories()
+
+                    # Filtra la categoria "generale" che non può essere eliminata
+                    delete_options = [cat for cat in available_categories if cat != "generale"]
+
+                    if not delete_options:
+                        st.info("Non ci sono categorie che possono essere eliminate.")
+                        st.form_submit_button("🗑️ Elimina Categoria", disabled=True)
+                    else:
+                        category_to_delete = st.selectbox(
+                            "Categoria da eliminare",
+                            options=delete_options,
+                            key="category_to_delete"
+                        )
+
+                        # Opzioni per la sostituzione (tutte le categorie tranne quella da eliminare)
+                        replacement_options = [cat for cat in available_categories if cat != category_to_delete]
+                        replacement_category = st.selectbox(
+                            "Sostituisci con",
+                            options=replacement_options,
+                            index=0,  # Default alla prima opzione (probabilmente "generale")
+                            key="replacement_category"
+                        )
+
+                        delete_button = st.form_submit_button("🗑️ Elimina Categoria")
+
+                        if delete_button and category_to_delete:
+                            success = self.hint_manager.delete_category(category_to_delete, replacement_category)
+                            if success:
+                                st.success(f"✅ Categoria '{category_to_delete}' eliminata con successo!")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Errore nell'eliminazione della categoria '{category_to_delete}'")
+
+            # Mostra le categorie esistenti
+            st.subheader("Categorie Disponibili")
+            available_categories = self.hint_manager.get_all_categories()
+            if available_categories:
+                # Visualizza le categorie in una griglia di chip
+                categories_html = ""
+                for category in available_categories:
+                    categories_html += (
+                        '<span style="background-color:grey;padding:5px 10px;'
+                        f'margin:5px;border-radius:15px;display:inline-block">{category}</span>'
+                    )
+
+                st.markdown(categories_html, unsafe_allow_html=True)
+            else:
+                st.info("Nessuna categoria disponibile.")
+
+            st.markdown("---")  # Separatore visivo
+
 
 class BackendClient:
     """Gestisce le chiamate API al backend."""
@@ -1011,7 +1063,6 @@ class ResultVisualizer:
     @staticmethod
     def display_results(data):
         """Visualizza i risultati dell'analisi."""
-        st.success("✅ Analisi completata!")
 
         # Mostra il provider LLM utilizzato
         if "llm_provider" in data:
@@ -1024,8 +1075,8 @@ class ResultVisualizer:
         st.write(data['descrizione'])
 
         # Mostra query SQL utilizzata
-        st.subheader("🔍 Query SQL:")
-        st.code(data['query_sql'], language="sql")
+        with st.expander("🔍 Visualizza query SQL", expanded=False):
+            st.code(data['query_sql'], language="sql")
 
         # Notifica sulla cache
         if data.get("cache_used", False):
@@ -1038,14 +1089,8 @@ class ResultVisualizer:
         st.subheader("📋 Dati Analizzati:")
         st.dataframe(df)
 
-        # Mostra i grafici
-        if "grafici" in data and data["grafici"]:
-            st.subheader("📊 Grafici Generati dall'AI")
-            st.image(data["grafici"], caption="Grafico Generato", use_container_width=True)
-
         # Scarica il file Excel
         if not df.empty:
-            st.subheader("📥 Scarica i Dati in Excel")
             output = BytesIO()
             df.to_excel(output, index=False, engine='xlsxwriter')
             output.seek(0)
@@ -1055,6 +1100,11 @@ class ResultVisualizer:
                 file_name="analisi.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+        # Mostra i grafici
+        if "grafici" in data and data["grafici"]:
+            st.subheader("📊 Grafici Generati dall'AI")
+            st.image(data["grafici"], caption="Grafico Generato", use_container_width=True)
 
 
 def main():
@@ -1095,7 +1145,7 @@ def main():
             st.session_state.cerca_clicked = False
 
             domanda = ui_data["domanda"]
-            if domanda and domanda != "Scrivi la tua domanda...":
+            if domanda and domanda != "---":
                 # Mostra messaggio di avvio
                 st.info("🚀 Avvio analisi...")
 

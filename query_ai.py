@@ -7,8 +7,6 @@ import os
 import time
 from sqlalchemy.sql import text  # type: ignore
 from sqlalchemy.exc import SQLAlchemyError  # type: ignore
-from pandasai import SmartDataframe  # type: ignore
-from pandasai.llm.openai import OpenAI as OpenAILLM  # type: ignore
 from query_cache import get_cached_query, save_query_to_cache, delete_cached_query
 from hint_manager import format_hints_for_prompt
 import logging
@@ -34,7 +32,7 @@ def encode_figure_to_base64(fig):
     return base64.b64encode(img_bytes.read()).decode("utf-8")
 
 
-def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
+def generate_sql_query(domanda, db_schema, llm_config, db_type, hints_category):
     """
     Genera una query SQL basata sulla domanda dell'utente e sulla struttura del database.
 
@@ -46,12 +44,11 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
     """
 
     # Otteniamo gli hint attivi formattati per il prompt
-    formatted_hints = format_hints_for_prompt()
+    formatted_hints = format_hints_for_prompt(hints_category)
     hints_section = f"\n\n{formatted_hints}\n" if formatted_hints else ""
 
     # Adatta il prompt in base al tipo di database
     db_type_desc = "PostgreSQL" if db_type == "postgresql" else "Microsoft SQL Server"
-    primary_key_id_hint = "Nota: tutte le tabelle hanno una chiave primaria denominata 'id'." if db_type == "postgresql" else ""
 
     # Aggiungi eventuali differenze sintattiche specifiche per SQL Server
     syntax_notes = ""
@@ -69,7 +66,6 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
     prompt_sql = f"""
     Sei un esperto di database SQL. Ti verrà fornita la struttura di un database {db_type_desc},
     comprensivo di tabelle, colonne, chiavi primarie e commenti.
-    {primary_key_id_hint}
     Riceverai una domanda posta da un utente in linguaggio naturale.
     Dovrai generare una query SQL che risponda alla domanda dell'utente restituendo **solo**
     la query SQL necessaria per ottenere la risposta senza alcuna spiegazione o testo aggiuntivo.
@@ -91,6 +87,8 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
         # Ottieni l'istanza LLM appropriata
         llm_instance = get_llm_instance(provider, llm_config)
 
+        logger.info(f"🔍 Generazione della query SQL con prompt: {prompt_sql}")
+
         # Genera la query SQL
         sql_query = llm_instance.generate_query(prompt_sql)
 
@@ -101,7 +99,9 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type="postgresql"):
         return None
 
 
-def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine, max_attempts=3, progress_callback=None):
+def generate_query_with_retry(
+        domanda, db_schema, llm_config, use_cache, engine, hints_category,
+        max_attempts=3, progress_callback=None):
     """
     Esegue una query SQL generata dall'AI con sistema di retry in caso di errori sintattici.
 
@@ -214,7 +214,7 @@ def generate_query_with_retry(domanda, db_schema, llm_config, use_cache, engine,
         query_prompt = domanda + error_context
 
         # Genera la query SQL
-        query_sql = generate_sql_query(query_prompt, db_schema, llm_config, db_type)
+        query_sql = generate_sql_query(query_prompt, db_schema, llm_config, db_type, hints_category)
 
         # Se non è stata generata una query valida, continua
         if not query_sql:
@@ -378,60 +378,32 @@ def process_query_results(engine, sql_query, domanda, llm_config):
             except Exception:
                 pass  # Se fallisce, lasciamo la colonna invariata
 
-        # Otteniamo gli hint attivi formattati per il prompt
-        formatted_hints = format_hints_for_prompt()
-        hints_section = f"\n\n{formatted_hints}\n" if formatted_hints else ""
-
         # Selezioniamo il provider LLM appropriato
         provider = llm_config.get("provider", "openai")
-        if provider == "openai":
-            # ✅ Configurazione OpenAI per PandasAI
-            llm = OpenAILLM(api_token=llm_config.get("api_key"), model=llm_config.get("model", "gpt-4o-mini"))
-            sdf = SmartDataframe(df, config={
-                "llm": llm,
-                "save_charts": False,
-                "custom_whitelisted_dependencies": ["pandas", "matplotlib", "numpy", "seaborn", "plotly"]
-            })
+        llm_instance = get_llm_instance(provider, llm_config)
 
-            # ✅ Chiediamo all'AI di spiegare i dati senza grafici
-            prompt_analysis = f"""
-                **Domanda dell'utente**
-                "{domanda}"
+        # Prepariamo un prompt per l'analisi dei dati
+        data_sample = df.head(50).to_string()
+        analysis_prompt = f"""
+        **Domanda dell'utente**
+        "{domanda}"
 
-                {hints_section}
+        **Dati recuperati dal database (primi 50 record):**
+        {data_sample}
 
-                Sulla base della domanda e delle istruzioni sull'interpretazione dei dati,
-                descrivi i risultati in modo chiaro e utile nella lingua dell'utente senza grafici, solo testo.
-                Fai riferimento alle istruzioni sull'interpretazione dei dati quando opportuno.
-            """
+        **Statistiche dei dati:**
+        {df.describe().to_string()}
 
-            risposta = sdf.chat(prompt_analysis)
-        else:
-            # Per gli altri provider, possiamo usare direttamente le nostre classi LLM
-            llm_instance = get_llm_instance(provider, llm_config)
+        Sulla base della domanda, dei dati forniti e delle istruzioni sull'interpretazione dei dati,
+        descrivi in modo chiaro e utile i risultati.
+        Fornisci un'analisi che aiuti l'utente a comprendere i dati.
+        Rispondi nella lingua dell'utente senza proporre grafici, solo testo.
+        Fai riferimento alle istruzioni sull'interpretazione dei dati quando opportuno.
+        """
 
-            # Prepariamo un prompt per l'analisi dei dati con hint
-            data_sample = df.head(50).to_string()
-            analysis_prompt = f"""
-            **Domanda dell'utente**
-            "{domanda}"
+        risposta = llm_instance.generate_analysis(analysis_prompt)
 
-            **Dati recuperati dal database (primi 50 record):**
-            {data_sample}
-
-            **Statistiche dei dati:**
-            {df.describe().to_string()}
-
-            Sulla base della domanda, dei dati forniti e delle istruzioni sull'interpretazione dei dati,
-            descrivi in modo chiaro e utile i risultati.
-            Fornisci un'analisi che aiuti l'utente a comprendere i dati.
-            Rispondi nella lingua dell'utente senza proporre grafici, solo testo.
-            Fai riferimento alle istruzioni sull'interpretazione dei dati quando opportuno.
-            """
-
-            risposta = llm_instance.generate_analysis(analysis_prompt)
-
-        # ✅ Generiamo il codice per il grafico, includendo gli hint
+        # ✅ Generiamo il codice per il grafico
         plot_code = generate_plot_code(df, llm_config)
 
         path_grafico = ""
@@ -470,9 +442,6 @@ def generate_plot_code(df, llm_config):
     """
     Chiede all'AI di generare codice Matplotlib basato sui dati.
     """
-    # Otteniamo gli hint attivi formattati per il prompt
-    formatted_hints = format_hints_for_prompt()
-    hints_section = f"\n\n{formatted_hints}\n" if formatted_hints else ""
 
     prompt = f"""
     Genera più grafici Matplotlib identificando multipli KPI per visualizzare i seguenti dati:
