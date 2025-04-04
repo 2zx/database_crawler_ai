@@ -356,11 +356,18 @@ def clean_query(query_sql):
     return query_sql
 
 
-def process_query_results(engine, sql_query, domanda, llm_config):
+def process_query_results(engine, sql_query, domanda, llm_config, progress):
     """
     Esegue la query SQL generata dall'AI, analizza i dati e restituisce una risposta leggibile.
     """
     try:
+
+        progress.update({
+            "status": "processing",
+            "progress": 70,
+            "message": "Esecuzione query...",
+            "step": "execute_sql"
+        })
 
         # ✅ Connessione corretta con SQLAlchemy 2.0
         with engine.connect() as connection:
@@ -401,7 +408,21 @@ def process_query_results(engine, sql_query, domanda, llm_config):
         Fai riferimento alle istruzioni sull'interpretazione dei dati quando opportuno.
         """
 
+        progress.update({
+            "status": "processing",
+            "progress": 80,
+            "message": "Analisi risultati...",
+            "step": "process_results"
+        })
+
         risposta = llm_instance.generate_analysis(analysis_prompt)
+
+        progress.update({
+            "status": "processing",
+            "progress": 90,
+            "message": "Creazione visualizzazioni...",
+            "step": "generate_charts"
+        })
 
         # ✅ Generiamo il codice per il grafico
         plot_code = generate_plot_code(df, llm_config)

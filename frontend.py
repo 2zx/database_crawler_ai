@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Costanti dell'applicazione
-APP_TITLE = "L’AI che lavora per la tua lavanderia industriale"
+APP_TITLE = "L’AI che lavora per la tua lavanderia"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "/app/credentials.json")
 
@@ -137,7 +137,8 @@ class CredentialsManager:
         return {
             "ssh_host": self.credentials.get("ssh_host", ""),
             "ssh_user": self.credentials.get("ssh_user", ""),
-            "ssh_key": self.credentials.get("ssh_key", "")
+            "ssh_key": self.credentials.get("ssh_key", ""),
+            "use_ssh": self.credentials.get("use_ssh", False)
         }
 
     def get_db_config(self):
@@ -418,7 +419,6 @@ class UserInterface:
 
     def render_llm_settings(self):
         """Visualizza le impostazioni del LLM nella sidebar."""
-        st.header("Configurazione LLM")
 
         # Selezione del provider LLM
         provider_options = [(key, value["name"]) for key, value in LLM_PROVIDERS.items()]
@@ -486,22 +486,31 @@ class UserInterface:
 
     def render_connection_settings(self):
         """Visualizza le impostazioni di connessione nella sidebar."""
-        st.header("SSH & Database")
 
         # Sezione SSH
         st.subheader("🔐 SSH")
-        self.credentials_manager.credentials["ssh_host"] = st.text_input(
-            "IP Server SSH",
-            value=self.credentials_manager.credentials.get("ssh_host", "192.168.1.100")
-        )
-        self.credentials_manager.credentials["ssh_user"] = st.text_input(
-            "Utente SSH",
-            value=self.credentials_manager.credentials.get("ssh_user", "ubuntu")
-        )
-        self.credentials_manager.credentials["ssh_key"] = st.text_area(
-            "Chiave Privata SSH",
-            value=self.credentials_manager.credentials.get("ssh_key", "")
-        )
+
+        use_ssh = st.checkbox("Usa connessione SSH (tunnel)", value=bool(self.credentials_manager.credentials.get("ssh_host", "")))
+        self.credentials_manager.credentials["use_ssh"] = use_ssh
+
+        if use_ssh:
+            self.credentials_manager.credentials["ssh_host"] = st.text_input(
+                "IP Server SSH",
+                value=self.credentials_manager.credentials.get("ssh_host", "192.168.1.100")
+            )
+            self.credentials_manager.credentials["ssh_user"] = st.text_input(
+                "Utente SSH",
+                value=self.credentials_manager.credentials.get("ssh_user", "ubuntu")
+            )
+            self.credentials_manager.credentials["ssh_key"] = st.text_area(
+                "Chiave Privata SSH",
+                value=self.credentials_manager.credentials.get("ssh_key", "")
+            )
+        else:
+            # Se SSH non è usato, svuota i campi
+            self.credentials_manager.credentials["ssh_host"] = ""
+            self.credentials_manager.credentials["ssh_user"] = ""
+            self.credentials_manager.credentials["ssh_key"] = ""
 
         # Sezione Database
         st.subheader("🗄️ Database")
@@ -569,7 +578,6 @@ class UserInterface:
 
     def render_cache_settings(self):
         """Visualizza le impostazioni della cache nella sidebar."""
-        st.header("Impostazioni Cache")
 
         if st.button("🔄 Esporta Hint"):
             if self.hint_manager.export_hints():
@@ -587,11 +595,11 @@ class UserInterface:
         """Visualizza l'interfaccia principale dell'applicazione."""
 
         # Aggiungi il logo sopra il titolo
-        cola, colb = st.columns([1, 1])
+        cola, colb = st.columns([1, 2])
         with cola:
-            st.image("laundrybot_jit40.png", width=400)
+            st.image("laundrybot_jit40.png", width=300)
         with colb:
-            st.header(APP_TITLE)
+            st.title(APP_TITLE)
 
         st.write("")
         st.write("")
@@ -622,7 +630,7 @@ class UserInterface:
         provider_name = LLM_PROVIDERS[provider]["name"]
         model_name = self.credentials_manager.credentials.get(f"{provider}_model", "")
 
-        st.info(f"🧠 Utilizzando {provider_name} - {model_name}")
+        st.info(f"🧠 LLM {provider_name} - {model_name}")
 
         domande = []
         filter_hint_categ = self.credentials_manager.credentials.get("hint_category", "")
@@ -691,17 +699,19 @@ class UserInterface:
 
         # Mostra il progresso se una query è in corso
         if st.session_state.query_in_progress and st.session_state.query_id:
-            st.markdown("### 🔄 Elaborazione in corso")
+
+            st.markdown("### 🔄 Elaborazione")
 
             status_container = st.empty()
             progress_bar_container = st.empty()
 
-            # Recupera stato attuale
             try:
                 response = requests.get(f"{BACKEND_URL}/query_status/{st.session_state.query_id}")
                 if response.status_code == 200:
                     status_data = response.json()
                     st.session_state.query_status = status_data
+
+                    logger.info(f"Polling status: {status_data}")
 
                     progress = status_data.get("progress", 0)
                     status = status_data.get("status", "")
@@ -742,6 +752,11 @@ class UserInterface:
                         if "error_traceback" in status_data:
                             with st.expander("Dettagli errore"):
                                 st.code(status_data["error_traceback"])
+
+                    else:
+                        # 🔁 Ripeti polling dopo 2 secondi
+                        time.sleep(2)
+                        st.rerun()
 
                 else:
                     st.error(f"Errore polling: HTTP {response.status_code}")
@@ -1167,8 +1182,6 @@ def main():
 
             domanda = ui_data["domanda"]
             if domanda and domanda != "---":
-                # Mostra messaggio di avvio
-                st.info("🚀 Avvio analisi...")
 
                 # Ottieni la configurazione corrente
                 llm_config = credentials_manager.get_llm_config()
@@ -1188,7 +1201,6 @@ def main():
                         # Imposta stato di elaborazione e ID query
                         st.session_state.query_in_progress = True
                         st.session_state.query_id = data.get("query_id")
-                        st.success("🚀 Analisi avviata! La pagina verrà aggiornata automaticamente...")
                         # Forza il refresh con un piccolo ritardo per assicurarsi che lo stato sia salvato
                         time.sleep(0.5)
                         st.rerun()

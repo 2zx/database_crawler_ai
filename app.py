@@ -1,3 +1,4 @@
+import threading
 import uvicorn  # type: ignore
 from fastapi import FastAPI, HTTPException, BackgroundTasks  # type: ignore
 from pydantic import BaseModel  # type: ignore
@@ -6,6 +7,7 @@ import paramiko  # type: ignore
 from sqlalchemy import create_engine  # type: ignore
 import traceback
 import io
+import asyncio
 from query_ai import generate_query_with_retry, process_query_results
 from db_schema import get_db_schema
 import logging
@@ -37,6 +39,7 @@ class SSHConfig(BaseModel):
     ssh_host: str
     ssh_user: str
     ssh_key: str
+    use_ssh: bool
 
 
 class DBConfig(BaseModel):
@@ -126,15 +129,18 @@ def refresh_db_schema(request: RefreshRequest):
     try:
         logger.info("🔄 Forzata nuova scansione del database...")
 
-        # Crea il tunnel SSH
-        ssh_tunnel, local_port = create_ssh_tunnel(
-            request.ssh_config.ssh_host,
-            request.ssh_config.ssh_user,
-            request.ssh_config.ssh_key,
-            request.db_config.host,
-            request.db_config.port,
-            request.db_config.db_type
-        )
+        if request.ssh_config.use_ssh:
+            logger.info("🔌 Tunnel SSH abilitato")
+
+            # Crea il tunnel SSH
+            ssh_tunnel, local_port = create_ssh_tunnel(
+                request.ssh_config.ssh_host,
+                request.ssh_config.ssh_user,
+                request.ssh_config.ssh_key,
+                request.db_config.host,
+                request.db_config.port,
+                request.db_config.db_type
+            )
 
         # Connessione al database in base al tipo
         if request.db_config.db_type == "sqlserver":
@@ -300,8 +306,11 @@ async def query_database(request: QueryRequest, background_tasks: BackgroundTask
         # Genera un ID univoco per questa query
         query_id = str(uuid.uuid4())
 
-        # Avvia l'elaborazione in background
-        background_tasks.add_task(process_query_in_background, query_id, request)
+        def run_in_background():
+            asyncio.run(process_query_in_background(query_id, request))
+
+        thread = threading.Thread(target=run_in_background)
+        thread.start()
 
         # Restituisci immediatamente l'ID della query
         return {"query_id": query_id, "status": "processing"}
@@ -329,23 +338,26 @@ async def process_query_in_background(query_id, request_data):
         if request_data.force_no_cache:
             logger.info("⚠️ Forzata rigenerazione query SQL (ignorata cache)")
 
-        # Aggiorna lo stato: apertura tunnel SSH
-        query_progress[query_id].update({
-            "status": "connecting",
-            "progress": 10,
-            "message": "Apertura connessione al database...",
-            "step": "ssh_tunnel"
-        })
+        if request_data.ssh_config.use_ssh:
+            logger.info("🔌 Tunnel SSH abilitato")
 
-        # Crea il tunnel SSH
-        ssh_tunnel, local_port = create_ssh_tunnel(
-            request_data.ssh_config.ssh_host,
-            request_data.ssh_config.ssh_user,
-            request_data.ssh_config.ssh_key,
-            request_data.db_config.host,
-            request_data.db_config.port,
-            request_data.db_config.db_type
-        )
+            # Aggiorna lo stato: apertura tunnel SSH
+            query_progress[query_id].update({
+                "status": "connecting",
+                "progress": 10,
+                "message": "Apertura connessione al database...",
+                "step": "ssh_tunnel"
+            })
+
+            # Crea il tunnel SSH
+            ssh_tunnel, local_port = create_ssh_tunnel(
+                request_data.ssh_config.ssh_host,
+                request_data.ssh_config.ssh_user,
+                request_data.ssh_config.ssh_key,
+                request_data.db_config.host,
+                request_data.db_config.port,
+                request_data.db_config.db_type
+            )
 
         # Configura la connessione al database in base al tipo
         if request_data.db_config.db_type == "sqlserver":
@@ -439,25 +451,9 @@ async def process_query_in_background(query_id, request_data):
                 "cache_used": False
             })
 
-        # Aggiorna lo stato: elaborazione risultati
-        query_progress[query_id].update({
-            "status": "processing",
-            "progress": 70,
-            "message": "Esecuzione query e analisi risultati...",
-            "step": "process_results"
-        })
-
         # Esegue la query e ottiene il risultato
-        risposta = process_query_results(engine, sql_query, request_data.domanda, llm_config)
+        risposta = process_query_results(engine, sql_query, request_data.domanda, llm_config, query_progress[query_id])
         logger.info("✅ Query eseguita con successo!")
-
-        # Aggiorna lo stato: grafici
-        query_progress[query_id].update({
-            "status": "visualizing",
-            "progress": 90,
-            "message": "Generazione visualizzazioni...",
-            "step": "generate_charts"
-        })
 
         # Aggiunge informazioni aggiuntive alla risposta
         risposta["query_sql"] = sql_query
