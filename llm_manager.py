@@ -155,7 +155,7 @@ class DeepSeekLLM(BaseLLM):
         self.model = model
         self.api_url = "https://api.deepseek.com/v1/chat/completions"  # Endpoint API (da verificare)
 
-    def _make_request(self, messages, max_tokens=1000):
+    def _make_request(self, messages, max_tokens=1000, temperature=0.7):
         """Effettua una richiesta all'API DeepSeek."""
         headers = {
             "Content-Type": "application/json",
@@ -165,7 +165,10 @@ class DeepSeekLLM(BaseLLM):
         payload = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": max_tokens
+            "max_tokens": max_tokens,
+            "top_p": 0.1,        # Filtra solo le opzioni più probabili
+            "frequency_penalty": 0.5,  # Riduce ripetizioni (utile per dati tecnici),
+            "temperature": temperature
         }
 
         try:
@@ -193,7 +196,7 @@ class DeepSeekLLM(BaseLLM):
                 {"role": "user", "content": prompt}
             ]
 
-            response = self._make_request(messages, max_tokens)
+            response = self._make_request(messages, max_tokens, 0.2)
 
             # Estrai il testo dalla risposta (struttura da adattare in base all'API reale)
             return response.get("choices", [{}])[0].get("message", {}).get("content", "")

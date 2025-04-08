@@ -390,12 +390,12 @@ def process_query_results(engine, sql_query, domanda, llm_config, progress):
         llm_instance = get_llm_instance(provider, llm_config)
 
         # Prepariamo un prompt per l'analisi dei dati
-        data_sample = df.head(50).to_string()
+        data_sample = df.head(100).to_string()
         analysis_prompt = f"""
         **Domanda dell'utente**
         "{domanda}"
 
-        **Dati recuperati dal database (primi 50 record):**
+        **Dati recuperati dal database (primi 100 record):**
         {data_sample}
 
         **Statistiche dei dati:**

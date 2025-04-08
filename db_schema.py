@@ -71,8 +71,9 @@ def get_db_schema(engine, db_type, force_refresh=False):
             "config",
             "settings",
             "report",
-            "wizard"
+            "wizard",
         ] if db_type == "postgresql" else [
+            "FERMIPRODUZIONE"
         ]
 
         # Verifica se la tabella ha un prefisso da ignorare
@@ -94,7 +95,7 @@ def get_db_schema(engine, db_type, force_refresh=False):
             "stock", "account", "country", "company",
             "mrp", "maintenance", "fleet", "hr", "itinerary"
         ] if db_type == "postgresql" else [
-            "produzione", "clienti", "articoli", "clientiarticoli"
+            "produzione", "clienti", "articoli", "clientiarticoli", "allarmi"
         ]
 
         # Verifichiamo se la tabella NON contiene nessuna delle parole chiave

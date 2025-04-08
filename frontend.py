@@ -679,8 +679,8 @@ class UserInterface:
             st.session_state.polling_active = False
 
         # Pulsanti per le azioni
-        col1, col2 = st.columns([1, 1])
-        with col1:
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:
             cerca_button = st.button(
                 "🔍 Cerca",
                 use_container_width=True,
@@ -688,14 +688,6 @@ class UserInterface:
             )
             if cerca_button:
                 st.session_state.cerca_clicked = True
-        with col2:
-            refresh_button = st.button(
-                "🔄 Riscansiona Database",
-                use_container_width=True,
-                disabled=st.session_state.query_in_progress
-            )
-            if refresh_button:
-                st.session_state.refresh_clicked = True
 
         # Mostra il progresso se una query è in corso
         if st.session_state.query_in_progress and st.session_state.query_id:
@@ -1053,6 +1045,16 @@ class UserInterface:
                 st.info("Nessuna categoria disponibile.")
 
             st.markdown("---")  # Separatore visivo
+
+            st.subheader("Schema Database")
+
+            refresh_button = st.button(
+                "🔄 Riscansiona Database",
+                use_container_width=True,
+                disabled=st.session_state.query_in_progress
+            )
+            if refresh_button:
+                st.session_state.refresh_clicked = True
 
 
 class BackendClient:

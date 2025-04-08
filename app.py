@@ -420,7 +420,7 @@ async def process_query_in_background(query_id, request_data):
             use_cache,
             engine,
             request_data.db_config.hint_category,
-            5,
+            9,
             progress_callback=lambda status, message, step, progress:
                 query_progress[query_id].update({
                     "status": status,
