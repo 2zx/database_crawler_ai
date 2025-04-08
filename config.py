@@ -18,6 +18,7 @@ HINT_DB_URL = f"sqlite:///{HINT_DB_PATH}"
 EMBEDDINGS_PATH = os.path.join(CACHE_DIR, "embeddings")
 HINTS_FILE = os.path.join(CACHE_DIR, "hints.json")
 DB_SCHEMA_CACHE_PATH = os.path.join(CACHE_DIR, "db_schema.json")
+PROFILES_FILE = os.path.join(CACHE_DIR, "connection_profiles.json")
 
 # Creazione automatica delle directory necessarie
 os.makedirs(CACHE_DIR, exist_ok=True)

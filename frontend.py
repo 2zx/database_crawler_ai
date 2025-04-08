@@ -11,6 +11,8 @@ import streamlit as st   # type: ignore
 import requests   # type: ignore
 from io import BytesIO
 from dotenv import load_dotenv   # type: ignore
+from connection_profiles import ConnectionProfileManager
+from config import PROFILES_FILE
 import logging
 
 
@@ -400,6 +402,7 @@ class UserInterface:
         self.credentials_manager = credentials_manager
         self.llm_manager = llm_manager
         self.hint_manager = hint_manager
+        self.profile_manager = ConnectionProfileManager(PROFILES_FILE)
 
     def render_sidebar(self):
         """Visualizza la sidebar con le impostazioni."""
@@ -487,6 +490,82 @@ class UserInterface:
     def render_connection_settings(self):
         """Visualizza le impostazioni di connessione nella sidebar."""
 
+        # Sezione Profili di connessione (NUOVA)
+        st.subheader("💼 Profili di connessione")
+
+        # Ottieni i profili disponibili
+        profile_names = self.profile_manager.get_profile_names()
+
+        # Selettore di profili
+        if profile_names:
+            profiles_options = ["---"] + profile_names
+            selected_profile = st.selectbox(
+                "Seleziona un profilo",
+                options=profiles_options,
+                key="profile_selector"
+            )
+
+            col0, col1, col2 = st.columns(3)
+            # Se viene selezionato un profilo, caricalo
+            if selected_profile != "---":
+                with col0:
+                    if st.button("📂 Carica profilo", key="load_profile_button"):
+                        profile_data = self.profile_manager.get_profile(selected_profile)
+                        if profile_data:
+                            # Aggiorna le credenziali con quelle del profilo
+                            for key, value in profile_data.items():
+                                self.credentials_manager.credentials[key] = value
+
+                            # Salva le credenziali aggiornate
+                            self.credentials_manager.save_credentials()
+                            st.success(f"✅ Profilo '{selected_profile}' caricato con successo!")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Errore nel caricamento del profilo '{selected_profile}'")
+
+                with col1:
+                    if st.button("🗑️ Elimina", key="delete_profile_button"):
+                        if selected_profile != "---":
+                            if self.profile_manager.delete_profile(selected_profile):
+                                st.success(f"✅ Profilo '{selected_profile}' eliminato con successo!")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Errore nell'eliminazione del profilo '{selected_profile}'")
+                        else:
+                            st.warning("⚠️ Seleziona un profilo da eliminare")
+
+                with col2:
+                    if st.button("🔄 Aggiorna", key="update_profile_button"):
+                        if selected_profile != "---":
+                            # Salva le credenziali correnti nel profilo selezionato
+                            if self.profile_manager.save_profile(selected_profile, self.credentials_manager.credentials):
+                                st.success(f"✅ Profilo '{selected_profile}' aggiornato con successo!")
+                            else:
+                                st.error(f"❌ Errore nell'aggiornamento del profilo '{selected_profile}'")
+                        else:
+                            st.warning("⚠️ Seleziona un profilo da aggiornare")
+
+        # Salva il profilo corrente
+        with st.form(key="save_profile_form"):
+            profile_name = st.text_input("Nome del nuovo profilo", key="new_profile_name")
+            save_button = st.form_submit_button("💾 Salva come nuovo profilo")
+
+            if save_button and profile_name:
+                # Verifica se il profilo esiste già
+                if profile_name in profile_names:
+                    if st.warning(f"⚠️ Il profilo '{profile_name}' esiste già. Vuoi sovrascriverlo?"):
+                        st.button("✓ Sì, sovrascrivi", key="overwrite_confirm", on_click=lambda: self._save_profile(profile_name))
+                        st.button("✗ No, annulla", key="overwrite_cancel")
+                else:
+                    # Salva il nuovo profilo
+                    if self.profile_manager.save_profile(profile_name, self.credentials_manager.credentials):
+                        st.success(f"✅ Nuovo profilo '{profile_name}' salvato con successo!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Errore nel salvataggio del profilo '{profile_name}'")
+
+        st.markdown("---")  # Separatore visivo
+
         # Sezione SSH
         st.subheader("🔐 SSH")
 
@@ -572,9 +651,48 @@ class UserInterface:
             key="config_hint_category"
         )
 
-        if st.button("💾 Salva credenziali"):
-            self.credentials_manager.save_credentials()
-            st.success("✅ Credenziali salvate con successo!")
+        # Layout dei pulsanti finali: barra separatrice
+        st.markdown("---")
+
+        # Pulsante di test e di salvataggio su due colonne
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("🔌 Test connessione", use_container_width=True):
+                self.test_connection()
+
+        with col2:
+            if st.button("💾 Salva credenziali", use_container_width=True):
+                self.credentials_manager.save_credentials()
+                st.success("✅ Credenziali salvate con successo!")
+
+        # Aggiungiamo la logica per mostrare feedback dettagliato del test di connessione
+        if "test_result" in st.session_state:
+            result = st.session_state.test_result
+            if result.get("ssh_success") and result.get("db_success"):
+                st.success("✅ Connessione completata con successo!")
+            else:
+                if not result.get("ssh_success"):
+                    st.error(f"❌ Errore SSH: {result.get('ssh_error', 'Errore sconosciuto')}")
+                elif not result.get("db_success"):
+                    st.warning(f"⚠️ SSH OK, ma errore database: {result.get('db_error', 'Errore sconosciuto')}")
+
+                # Suggerimenti per risolvere problemi comuni
+                with st.expander("🔧 Suggerimenti per risolvere i problemi"):
+                    st.markdown("""
+                    ### Problemi di connessione SSH
+                    - Verifica che l'indirizzo IP e la porta del server SSH siano corretti
+                    - Controlla che l'utente SSH abbia i permessi di accesso
+                    - Assicurati che la chiave privata SSH sia nel formato corretto
+                    - Verifica che il server SSH sia raggiungibile dalla tua rete
+
+                    ### Problemi di connessione al database
+                    - Verifica che il nome utente e la password del database siano corretti
+                    - Controlla che il nome del database sia scritto correttamente
+                    - Assicurati che l'utente abbia i permessi per accedere al database
+                    - Verifica che il firewall del server non blocchi la connessione
+                    - Se usi SSH, controlla che l'utente SSH possa raggiungere il server database
+                    """)
 
     def render_cache_settings(self):
         """Visualizza le impostazioni della cache nella sidebar."""
@@ -1055,6 +1173,38 @@ class UserInterface:
             )
             if refresh_button:
                 st.session_state.refresh_clicked = True
+
+    def test_connection(self):
+        """
+        Testa la connessione SSH e SQL con le credenziali correnti.
+        """
+        with st.spinner("Test in corso..."):
+            try:
+                # Prepara le configurazioni
+                ssh_config = self.credentials_manager.get_ssh_config()
+                db_config = self.credentials_manager.get_db_config()
+
+                # Effettua il test attraverso l'API
+                response = requests.post(
+                    f"{BACKEND_URL}/test_connection",
+                    json={
+                        "ssh_config": ssh_config,
+                        "db_config": db_config
+                    }
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("ssh_success") and result.get("db_success"):
+                        st.success("✅ Connessione SSH e database riuscita!")
+                    elif result.get("ssh_success"):
+                        st.warning("⚠️ Connessione SSH riuscita, ma la connessione al database è fallita: " + result.get("db_error", ""))
+                    else:
+                        st.error("❌ Connessione SSH fallita: " + result.get("ssh_error", ""))
+                else:
+                    st.error(f"❌ Errore durante il test: {response.text}")
+            except Exception as e:
+                st.error(f"❌ Errore di comunicazione: {str(e)}")
 
 
 class BackendClient:

@@ -196,7 +196,7 @@ class DeepSeekLLM(BaseLLM):
                 {"role": "user", "content": prompt}
             ]
 
-            response = self._make_request(messages, max_tokens, 0.2)
+            response = self._make_request(messages, max_tokens, 0.3)
 
             # Estrai il testo dalla risposta (struttura da adattare in base all'API reale)
             return response.get("choices", [{}])[0].get("message", {}).get("content", "")

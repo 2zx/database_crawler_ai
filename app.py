@@ -5,6 +5,7 @@ from pydantic import BaseModel  # type: ignore
 from sshtunnel import SSHTunnelForwarder  # type: ignore
 import paramiko  # type: ignore
 from sqlalchemy import create_engine  # type: ignore
+from sqlalchemy.sql import text  # type: ignore
 import traceback
 import io
 import asyncio
@@ -90,6 +91,11 @@ class CategoryRequest(BaseModel):
 class CategoryDeleteRequest(BaseModel):
     name: str
     replace_with: str = "generale"
+
+
+class ConnectionTestRequest(BaseModel):
+    ssh_config: SSHConfig
+    db_config: DBConfig
 
 
 def create_ssh_tunnel(ssh_host, ssh_user, ssh_key, db_host, db_port, db_type="postgresql"):
@@ -534,6 +540,108 @@ def check_query_status(query_id: str):
         raise HTTPException(status_code=404, detail="Query ID non trovato")
 
     return query_progress[query_id]
+
+
+@app.post("/test_connection")
+def test_connection(request: ConnectionTestRequest):
+    """
+    Testa la connessione SSH e al database.
+    Restituisce lo stato di entrambe le connessioni.
+    """
+    response = {
+        "ssh_success": False,
+        "db_success": False,
+        "ssh_error": "",
+        "db_error": ""
+    }
+
+    ssh_tunnel = None
+
+    try:
+        # Primo test: SSH (se richiesto)
+        if request.ssh_config.use_ssh:
+            logger.info(f"🔌 Test connessione SSH verso {request.ssh_config.ssh_host}")
+            try:
+                # Crea la chiave privata
+                pkey = paramiko.RSAKey(file_obj=io.StringIO(request.ssh_config.ssh_key))
+
+                # Determinazione porta locale
+                local_port = 5433 if request.db_config.db_type == "postgresql" else 5434
+
+                # Tentativo di connessione SSH
+                ssh_tunnel = SSHTunnelForwarder(
+                    (request.ssh_config.ssh_host, 22),
+                    ssh_username=request.ssh_config.ssh_user,
+                    ssh_pkey=pkey,
+                    remote_bind_address=(request.db_config.host, int(request.db_config.port)),
+                    local_bind_address=('127.0.0.1', local_port)
+                )
+
+                ssh_tunnel.start()
+                response["ssh_success"] = True
+                logger.info("✅ Test SSH riuscito")
+            except Exception as e:
+                response["ssh_error"] = str(e)
+                logger.error(f"❌ Errore nel test SSH: {e}")
+                return response
+        else:
+            # Se non usiamo SSH, marchiamo comunque come successo
+            response["ssh_success"] = True
+            logger.info("⏩ Test SSH saltato (tunnel non richiesto)")
+            local_port = int(request.db_config.port)
+
+        # Secondo test: connessione al database
+        try:
+            logger.info(f"🔌 Test connessione al DB {request.db_config.db_type} su {request.db_config.host}:{request.db_config.port}")
+
+            # Crea la stringa di connessione in base al tipo di database
+            if request.db_config.db_type == "sqlserver":
+                # Per SQL Server
+                if request.ssh_config.use_ssh:
+                    db_url = (
+                        f"mssql+pymssql://{request.db_config.user}:{request.db_config.password}"
+                        f"@127.0.0.1:{local_port}/{request.db_config.database}"
+                    )
+                else:
+                    db_url = (
+                        f"mssql+pymssql://{request.db_config.user}:{request.db_config.password}"
+                        f"@{request.db_config.host}:{local_port}/{request.db_config.database}"
+                    )
+            else:
+                # Per PostgreSQL (default)
+                if request.ssh_config.use_ssh:
+                    db_url = (
+                        f"postgresql://{request.db_config.user}:{request.db_config.password}"
+                        f"@127.0.0.1:{local_port}/{request.db_config.database}"
+                    )
+                else:
+                    db_url = (
+                        f"postgresql://{request.db_config.user}:{request.db_config.password}"
+                        f"@{request.db_config.host}:{local_port}/{request.db_config.database}"
+                    )
+
+            # Tenta di stabilire la connessione
+            engine = create_engine(db_url)
+            with engine.connect() as connection:
+                # Esegui una query semplice per verificare la connessione
+                if request.db_config.db_type == "sqlserver":
+                    connection.execute(text("SELECT 1"))
+                else:
+                    connection.execute(text("SELECT 1"))
+
+            response["db_success"] = True
+            logger.info("✅ Test database riuscito")
+        except Exception as e:
+            response["db_error"] = str(e)
+            logger.error(f"❌ Errore nel test database: {e}")
+
+        return response
+
+    finally:
+        # Chiudi il tunnel SSH se è stato aperto
+        if ssh_tunnel and ssh_tunnel.is_active:
+            ssh_tunnel.stop()
+            logger.info("🔌 Tunnel SSH chiuso dopo test")
 
 
 @app.get("/")
