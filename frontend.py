@@ -39,8 +39,8 @@ DOMANDE_SUGGERITE = {
     ],
     "jit40": [
         "Mostrami l'andamento del fatturato dell'ultimo anno per categoria",
-        "Qual è stato il prodotto più consegnato negli ultimi 6 mesi?",
-        "Qual è la media dei prezzi unitari per categoria?",
+        "Quali sono stati i primi 5 prodotti più consegnati negli ultimi 6 mesi?",
+        "Qual è la media dei prezzi unitari per categoria di prodotto?",
         "Qual'è, in quintali, il bollettato medio settimanale per ciascuna categoria?",
     ]
 }
@@ -743,6 +743,15 @@ class UserInterface:
 
     def render_analysis_tab(self):
         """Visualizza la tab di analisi dati con indicatori di progresso."""
+        # Controlla se c'è una nuova domanda da eseguire
+        if hasattr(st.session_state, 'run_new_question') and st.session_state.run_new_question:
+            st.session_state.run_new_question = False
+            domanda_input = st.session_state.new_question
+            # Cancella la domanda dopo averla usata
+            del st.session_state.new_question
+        else:
+            domanda_input = ""
+
         # Mostra il provider LLM attualmente selezionato
         provider = self.credentials_manager.credentials.get("llm_provider", "openai")
         provider_name = LLM_PROVIDERS[provider]["name"]
@@ -760,9 +769,10 @@ class UserInterface:
             "Seleziona una domanda",
             ["---"] + domande
         )
+        # Modifica all'input della domanda per usare il valore preimpostato
         domanda_input = st.text_area(
             label="Oppure scrivi una domanda libera",
-            value="",
+            value=domanda_input,
             height=200,
             max_chars=1000,
             help="Inserisci la tua descrizione qui. Massimo 1000 caratteri."
@@ -799,12 +809,11 @@ class UserInterface:
         # Pulsanti per le azioni
         col1, col2, col3 = st.columns([1, 1, 1])
         with col2:
-            cerca_button = st.button(
+            if st.button(
                 "🔍 Cerca",
                 use_container_width=True,
                 disabled=st.session_state.query_in_progress
-            )
-            if cerca_button:
+            ):
                 st.session_state.cerca_clicked = True
 
         # Mostra il progresso se una query è in corso
@@ -1166,12 +1175,11 @@ class UserInterface:
 
             st.subheader("Schema Database")
 
-            refresh_button = st.button(
+            if st.button(
                 "🔄 Riscansiona Database",
                 use_container_width=True,
                 disabled=st.session_state.query_in_progress
-            )
-            if refresh_button:
+            ):
                 st.session_state.refresh_clicked = True
 
     def test_connection(self):
@@ -1293,6 +1301,20 @@ class ResultVisualizer:
         if "grafici" in data and data["grafici"]:
             st.subheader("📊 Grafici Generati dall'AI")
             st.image(data["grafici"], caption="Grafico Generato", use_container_width=True)
+
+        # Mostra domande correlate (se disponibili)
+        if "related_questions" in data and data["related_questions"]:
+            st.subheader("🔄 Possibili approfondimenti:")
+
+            for i, question in enumerate(data["related_questions"]):
+                col1, col2 = st.columns([9, 1])
+                with col1:
+                    st.write(f"{i+1}. {question}")
+                with col2:
+                    if st.button("🔍", key=f"explore_{i}"):
+                        # Imposta questa domanda come la nuova domanda di ricerca
+                        st.session_state.new_question = question
+                        st.session_state.run_new_question = True
 
 
 def main():

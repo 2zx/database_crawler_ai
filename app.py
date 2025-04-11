@@ -9,7 +9,7 @@ from sqlalchemy.sql import text  # type: ignore
 import traceback
 import io
 import asyncio
-from query_ai import generate_query_with_retry, process_query_results
+from query_ai import generate_query_with_retry, process_query_results, generate_related_questions
 from db_schema import get_db_schema
 import logging
 from database import create_db
@@ -334,6 +334,20 @@ async def process_query_in_background(query_id, request_data):
             "status": "starting",
             "progress": 0,
             "message": "Inizializzazione della richiesta...",
+            "step": "init",
+            "domanda": request_data.domanda,  # Salva la domanda originale
+            "llm_config": {  # Salva la configurazione LLM
+                "provider": request_data.llm_config.provider,
+                "api_key": request_data.llm_config.api_key,
+                "model": request_data.llm_config.model
+            }
+        }
+
+        # Inizializza lo stato della query
+        query_progress[query_id] = {
+            "status": "starting",
+            "progress": 10,
+            "message": "Inizializzazione della richiesta...",
             "step": "init"
         }
 
@@ -350,7 +364,7 @@ async def process_query_in_background(query_id, request_data):
             # Aggiorna lo stato: apertura tunnel SSH
             query_progress[query_id].update({
                 "status": "connecting",
-                "progress": 10,
+                "progress": 20,
                 "message": "Apertura connessione al database...",
                 "step": "ssh_tunnel"
             })
@@ -386,7 +400,7 @@ async def process_query_in_background(query_id, request_data):
         # Aggiorna lo stato: recupero schema db
         query_progress[query_id].update({
             "status": "schema",
-            "progress": 20,
+            "progress": 30,
             "message": "Recupero struttura del database...",
             "step": "db_schema"
         })
@@ -467,6 +481,16 @@ async def process_query_in_background(query_id, request_data):
         risposta["llm_provider"] = request_data.llm_config.provider
         risposta["attempts"] = attempts  # Aggiungiamo il numero di tentativi
 
+        # Genera automaticamente domande correlate
+        related_questions = generate_related_questions(
+            results=risposta,
+            domanda=request_data.domanda,
+            llm_config=llm_config,
+            max_questions=5
+        )
+        logger.info(f"✅ Generate {len(related_questions)} domande correlate")
+        risposta["related_questions"] = related_questions
+
         # Chiude il tunnel SSH
         ssh_tunnel.stop()
         logger.info("🔌 Tunnel SSH chiuso.")
@@ -540,6 +564,50 @@ def check_query_status(query_id: str):
         raise HTTPException(status_code=404, detail="Query ID non trovato")
 
     return query_progress[query_id]
+
+
+@app.post("/related_questions/{query_id}")
+async def get_related_questions(query_id: str, max_questions: int = 5):
+    """
+    Genera domande correlate basate sui risultati di una query precedente.
+
+    Args:
+        query_id (str): L'ID della query precedente
+        max_questions (int): Numero massimo di domande da generare
+
+    Returns:
+        list: Lista di domande correlate
+    """
+    try:
+        # Verifica che la query esista e sia completata
+        if query_id not in query_progress:
+            raise HTTPException(status_code=404, detail="Query ID non trovato")
+
+        query_status = query_progress[query_id]
+        if query_status.get("status") != "completed":
+            raise HTTPException(status_code=400, detail="La query non è ancora completata")
+
+        # Ottieni i risultati e la domanda originale
+        results = query_status.get("result", {})
+        domanda = query_status.get("domanda", "")
+        llm_config = query_status.get("llm_config", {})
+
+        # Genera le domande correlate
+        related_questions = generate_related_questions(
+            results=results,
+            domanda=domanda,
+            llm_config=llm_config,
+            max_questions=max_questions
+        )
+
+        return {"questions": related_questions}
+
+    except HTTPException:
+        # Rilancia le eccezioni HTTP
+        raise
+    except Exception as e:
+        logger.error(f"❌ Errore nella generazione delle domande correlate: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Errore interno: {str(e)}")
 
 
 @app.post("/test_connection")

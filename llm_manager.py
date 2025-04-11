@@ -4,6 +4,7 @@ Fornisce un'interfaccia unificata per generare query SQL.
 """
 import httpx  # type: ignore
 import logging
+import re
 from abc import ABC, abstractmethod
 from openai import OpenAI  # type: ignore
 from anthropic import Anthropic  # type: ignore
@@ -42,6 +43,21 @@ class BaseLLM(ABC):
 
         Returns:
             str: L'analisi generata
+        """
+        pass
+
+    @abstractmethod
+    def generate_related_questions(self, context, results, max_questions=5):
+        """
+        Genera domande correlate basate sui risultati dell'analisi precedente.
+
+        Args:
+            context (str): Il contesto della domanda originale
+            results (dict): I risultati dell'analisi precedente
+            max_questions (int): Numero massimo di domande da generare
+
+        Returns:
+            list: Lista di domande correlate
         """
         pass
 
@@ -92,6 +108,51 @@ class OpenAILLM(BaseLLM):
             logger.error(f"❌ Errore OpenAI durante la generazione dell'analisi: {e}")
             raise Exception(f"Errore OpenAI: {str(e)}")
 
+    def generate_related_questions(self, context, results, max_questions=5):
+        """Genera domande correlate usando OpenAI."""
+        try:
+            prompt = f"""
+            Basandoti sulla seguente analisi di dati, genera {max_questions} domande di approfondimento
+            che l'utente potrebbe voler fare successivamente.
+            Le domande devono essere specifiche, correlate ai dati analizzati, e aiutare l'utente
+            a esplorare ulteriormente i dati o a scoprire nuovi insights.
+
+            {context}
+
+            Restituisci solo un elenco di domande numerate, una per riga, senza ulteriori spiegazioni.
+            Le domande devono essere formulate in italiano e in modo chiaro e conciso.
+            """
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "Sei un esperto di analisi dati che suggerisce domande di approfondimento pertinenti."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.7  # Un po' di creatività per generare domande diverse
+            )
+
+            result = response.choices[0].message.content.strip()
+
+            # Elaborazione della risposta per estrarre solo le domande
+            questions = []
+            for line in result.split('\n'):
+                # Rimuovi numerazione e altri caratteri
+                line = line.strip()
+                if line:
+                    # Rimuovi numerazione (es. "1. ", "1) ", ecc.)
+                    cleaned_line = re.sub(r'^\d+[\.\)\-]\s*', '', line)
+                    if cleaned_line:
+                        questions.append(cleaned_line)
+
+            # Limita al numero massimo richiesto
+            return questions[:max_questions]
+
+        except Exception as e:
+            logger.error(f"❌ Errore OpenAI durante la generazione delle domande correlate: {e}")
+            return []
+
 
 class ClaudeLLM(BaseLLM):
     """Implementazione LLM per Anthropic Claude."""
@@ -138,6 +199,51 @@ class ClaudeLLM(BaseLLM):
         except Exception as e:
             logger.error(f"❌ Errore Claude durante la generazione dell'analisi: {e}")
             raise Exception(f"Errore Claude: {str(e)}")
+
+    def generate_related_questions(self, context, results, max_questions=3):
+        """Genera domande correlate usando Claude."""
+        try:
+            prompt = f"""
+            Basandoti sulla seguente analisi di dati, genera {max_questions} domande di approfondimento
+            che l'utente potrebbe voler fare successivamente.
+            Le domande devono essere specifiche, correlate ai dati analizzati, e aiutare l'utente
+            a esplorare ulteriormente i dati o a scoprire nuovi insights.
+
+            {context}
+
+            Restituisci solo un elenco di domande numerate, una per riga, senza ulteriori spiegazioni.
+            Le domande devono essere formulate in italiano e in modo chiaro e conciso.
+            """
+
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=1000,
+                temperature=0.7,
+                system="Sei un esperto di analisi dati che suggerisce domande di approfondimento pertinenti.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            result = response.content[0].text.strip()
+
+            # Elaborazione della risposta per estrarre solo le domande
+            questions = []
+            for line in result.split('\n'):
+                # Rimuovi numerazione e altri caratteri
+                line = line.strip()
+                if line:
+                    # Rimuovi numerazione (es. "1. ", "1) ", ecc.)
+                    cleaned_line = re.sub(r'^\d+[\.\)\-]\s*', '', line)
+                    if cleaned_line:
+                        questions.append(cleaned_line)
+
+            # Limita al numero massimo richiesto
+            return questions[:max_questions]
+
+        except Exception as e:
+            logger.error(f"❌ Errore Claude durante la generazione delle domande correlate: {e}")
+            return []
 
 
 class DeepSeekLLM(BaseLLM):
@@ -219,6 +325,49 @@ class DeepSeekLLM(BaseLLM):
         except Exception as e:
             logger.error(f"❌ Errore DeepSeek durante la generazione della analisi: {e}")
             raise Exception(f"Errore DeepSeek: {str(e)}")
+
+    def generate_related_questions(self, context, results, max_questions=3):
+        """Genera domande correlate usando DeepSeek."""
+        try:
+            prompt = f"""
+            Basandoti sulla seguente analisi di dati, genera {max_questions} domande di approfondimento
+            che l'utente potrebbe voler fare successivamente.
+            Le domande devono essere specifiche, correlate ai dati analizzati, e aiutare l'utente
+            a esplorare ulteriormente i dati o a scoprire nuovi insights.
+
+            {context}
+
+            Restituisci solo un elenco di domande numerate, una per riga, senza ulteriori spiegazioni.
+            Le domande devono essere formulate in italiano e in modo chiaro e conciso.
+            """
+
+            messages = [
+                {"role": "system", "content": "Sei un esperto di analisi dati che suggerisce domande di approfondimento pertinenti."},
+                {"role": "user", "content": prompt}
+            ]
+
+            response = self._make_request(messages, 1000, 0.7)
+
+            # Estrai il testo dalla risposta (struttura da adattare in base all'API reale)
+            result = response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+
+            # Elaborazione della risposta per estrarre solo le domande
+            questions = []
+            for line in result.split('\n'):
+                # Rimuovi numerazione e altri caratteri
+                line = line.strip()
+                if line:
+                    # Rimuovi numerazione (es. "1. ", "1) ", ecc.)
+                    cleaned_line = re.sub(r'^\d+[\.\)\-]\s*', '', line)
+                    if cleaned_line:
+                        questions.append(cleaned_line)
+
+            # Limita al numero massimo richiesto
+            return questions[:max_questions]
+
+        except Exception as e:
+            logger.error(f"❌ Errore DeepSeek durante la generazione delle domande correlate: {e}")
+            return []
 
 
 class ErnieLLM(BaseLLM):
@@ -313,6 +462,47 @@ class ErnieLLM(BaseLLM):
         except Exception as e:
             logger.error(f"❌ Errore ERNIE durante la generazione dell'analisi: {e}")
             raise Exception(f"Errore ERNIE: {str(e)}")
+
+    def generate_related_questions(self, context, results, max_questions=5):
+        """Genera domande correlate usando ERNIE."""
+        try:
+            prompt = f"""
+            Basandoti sulla seguente analisi di dati, genera {max_questions} domande di approfondimento
+            che l'utente potrebbe voler fare successivamente.
+            Le domande devono essere specifiche, correlate ai dati analizzati, e aiutare l'utente
+            a esplorare ulteriormente i dati o a scoprire nuovi insights.
+
+            {context}
+
+            Restituisci solo un elenco di domande numerate, una per riga, senza ulteriori spiegazioni.
+            Le domande devono essere formulate in italiano e in modo chiaro e conciso.
+            """
+
+            messages = [
+                {"role": "system", "content": "Sei un esperto di analisi dati che suggerisce domande di approfondimento pertinenti."},
+                {"role": "user", "content": prompt}
+            ]
+
+            response = self._make_request(messages)
+            result = response.get("result", "").strip()
+
+            # Elaborazione della risposta per estrarre solo le domande
+            questions = []
+            for line in result.split('\n'):
+                # Rimuovi numerazione e altri caratteri
+                line = line.strip()
+                if line:
+                    # Rimuovi numerazione (es. "1. ", "1) ", ecc.)
+                    cleaned_line = re.sub(r'^\d+[\.\)\-]\s*', '', line)
+                    if cleaned_line:
+                        questions.append(cleaned_line)
+
+            # Limita al numero massimo richiesto
+            return questions[:max_questions]
+
+        except Exception as e:
+            logger.error(f"❌ Errore ERNIE durante la generazione delle domande correlate: {e}")
+            return []
 
 
 def get_llm_instance(provider, config):

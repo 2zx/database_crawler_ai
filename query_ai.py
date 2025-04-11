@@ -69,10 +69,13 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type, hints_category):
     Riceverai una domanda posta da un utente in linguaggio naturale.
     Dovrai generare una query SQL che risponda alla domanda dell'utente restituendo **solo**
     la query SQL necessaria per ottenere la risposta senza alcuna spiegazione o testo aggiuntivo.
+    La query non deve restituire più di 100 righe di dati: crea opportuni raggruppameti o filtri senza inficiare i dati stessi.
     {syntax_notes}
 
     **Struttura del Database:**
-    {db_schema}{hints_section}
+    {db_schema}
+
+    {hints_section}
 
     **Domanda dell'utente:**
     "{domanda}"
@@ -260,15 +263,14 @@ def generate_query_with_retry(
                 )
 
                 # Se non è dalla cache, salviamo la query
-                if use_cache and not cache_used:
+                if not cache_used:
                     update_progress(
                         "saving_to_cache",
                         "Salvataggio query nella cache...",
                         "save_to_cache",
                         progress_base + progress_per_attempt + 5
                     )
-
-                    # Salviamo nella cache solo se use_cache è True
+                    # Salva la query nella cache
                     save_query_to_cache(domanda, query_sql)
 
                 # La query è stata eseguita con successo
@@ -527,3 +529,44 @@ def execute_generated_plot_code(plot_code):
     except Exception as e:
         logger.error(f"Errore nell'esecuzione del codice generato: {e}")
         return f"Errore nell'esecuzione del codice generato: {e}"
+
+
+def generate_related_questions(results, domanda, llm_config, max_questions=3):
+    """
+    Genera domande correlate basate sui risultati dell'analisi precedente.
+
+    Args:
+        results (dict): I risultati dell'analisi precedente
+        domanda (str): La domanda originale dell'utente
+        llm_config (dict): Configurazione del LLM
+        max_questions (int): Numero massimo di domande da generare
+
+    Returns:
+        list: Lista di domande correlate
+    """
+    try:
+        # Selezioniamo il provider LLM appropriato
+        provider = llm_config.get("provider", "openai")
+        llm_instance = get_llm_instance(provider, llm_config)
+
+        # Prepariamo il contesto dalla domanda originale e dai risultati
+        context = f"""
+        Domanda originale: "{domanda}"
+
+        Descrizione dei risultati: "{results['descrizione']}"
+
+        Dati: {results['dati'][:5] if results['dati'] else 'Nessun dato'}
+        """
+
+        # Generiamo le domande correlate
+        related_questions = llm_instance.generate_related_questions(
+            context=context,
+            results=results,
+            max_questions=max_questions
+        )
+
+        return related_questions
+
+    except Exception as e:
+        logger.error(f"❌ Errore nella generazione delle domande correlate: {str(e)}")
+        return []
