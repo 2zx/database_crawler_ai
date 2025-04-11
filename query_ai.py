@@ -82,6 +82,8 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type, hints_category):
 
     Verifica che la query sia sintatticamente corretta per {db_type_desc}.
     Non generare mai valori inventati.
+    Se la domanda include richieste relative a dati non presenti sul database della lavanderia
+    restituisci una query che ritorni il messaggio "dato non disponibile nel database della lavanderia"
     """
 
     provider = llm_config.get("provider", "openai")
@@ -408,6 +410,8 @@ def process_query_results(engine, sql_query, domanda, llm_config, progress):
         Fornisci un'analisi che aiuti l'utente a comprendere i dati.
         Rispondi nella lingua dell'utente senza proporre grafici, solo testo.
         Fai riferimento alle istruzioni sull'interpretazione dei dati quando opportuno.
+        Se l'utente chiede dati non presenti nel database della lavanderia fai una ricerca tra i dati che conosci
+        a livello globale evidenziando all'utente che stai usando dati pubblici.
         """
 
         progress.update({
@@ -426,8 +430,10 @@ def process_query_results(engine, sql_query, domanda, llm_config, progress):
             "step": "generate_charts"
         })
 
-        # ✅ Generiamo il codice per il grafico
-        plot_code = generate_plot_code(df, llm_config)
+        plot_code = None
+        if "dato non disponibile" not in df.describe().to_string():
+            # ✅ Generiamo il codice per il grafico
+            plot_code = generate_plot_code(df, llm_config)
 
         path_grafico = ""
         if plot_code:

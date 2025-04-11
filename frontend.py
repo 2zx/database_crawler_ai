@@ -40,7 +40,8 @@ DOMANDE_SUGGERITE = {
     "jit40": [
         "Mostrami l'andamento del fatturato dell'ultimo anno per categoria",
         "Quali sono stati i primi 5 prodotti più consegnati negli ultimi 6 mesi?",
-        "Qual è la media dei prezzi unitari per categoria di prodotto?",
+        "Qual è la media dei prezzi unitari per categoria di prodotto venduto?",
+        "Negli acquisti quali prodotti hanno subito maggiori aumenti nel 2024 rispetto al 2023?",
         "Qual'è, in quintali, il bollettato medio settimanale per ciascuna categoria?",
     ]
 }
@@ -743,14 +744,13 @@ class UserInterface:
 
     def render_analysis_tab(self):
         """Visualizza la tab di analisi dati con indicatori di progresso."""
-        # Controlla se c'è una nuova domanda da eseguire
+        # Controlla se c'è una nuova domanda da eseguire dalle domande correlate
         if hasattr(st.session_state, 'run_new_question') and st.session_state.run_new_question:
             st.session_state.run_new_question = False
-            domanda_input = st.session_state.new_question
+            # Aggiorniamo direttamente session_state.domanda_selezionata
+            st.session_state.domanda_selezionata = st.session_state.new_question
             # Cancella la domanda dopo averla usata
             del st.session_state.new_question
-        else:
-            domanda_input = ""
 
         # Mostra il provider LLM attualmente selezionato
         provider = self.credentials_manager.credentials.get("llm_provider", "openai")
@@ -759,20 +759,38 @@ class UserInterface:
 
         st.info(f"🧠 LLM {provider_name} - {model_name}")
 
-        domande = []
+        # Ottieni le domande suggerite dalla categoria corrente
         filter_hint_categ = self.credentials_manager.credentials.get("hint_category", "")
-        if filter_hint_categ:
-            domande = DOMANDE_SUGGERITE[filter_hint_categ] if filter_hint_categ in DOMANDE_SUGGERITE else []
+        domande = []
+        if filter_hint_categ and filter_hint_categ in DOMANDE_SUGGERITE:
+            domande = DOMANDE_SUGGERITE[filter_hint_categ]
+
+        # Inizializza lo stato se necessario
+        if "domanda_selezionata" not in st.session_state:
+            st.session_state.domanda_selezionata = "---"
 
         # Selettore domande
+        # Un callback che viene attivato quando cambia la selezione
+        def on_domanda_change():
+            selected = st.session_state.domanda_selector
+            st.session_state.domanda_selezionata = selected
+
         domanda_selezionata = st.selectbox(
             "Seleziona una domanda",
-            ["---"] + domande
+            ["---"] + domande,
+            key="domanda_selector",
+            on_change=on_domanda_change
         )
-        # Modifica all'input della domanda per usare il valore preimpostato
-        domanda_input = st.text_area(
+
+        # Se la domanda selezionata è diversa da "---", la usiamo
+        domanda_da_mostrare = ""
+        if st.session_state.domanda_selezionata != "---":
+            domanda_da_mostrare = st.session_state.domanda_selezionata
+
+        # Modifica all'input della domanda
+        domanda_testo = st.text_area(
             label="Oppure scrivi una domanda libera",
-            value=domanda_input,
+            value=domanda_da_mostrare,
             height=200,
             max_chars=1000,
             help="Inserisci la tua descrizione qui. Massimo 1000 caratteri."
@@ -809,18 +827,25 @@ class UserInterface:
         # Pulsanti per le azioni
         col1, col2, col3 = st.columns([1, 1, 1])
         with col2:
-            if st.button(
+            # Callback quando viene premuto il bottone Cerca
+            def on_cerca_click():
+                st.session_state.cerca_clicked = True
+                # Salviamo la domanda corrente (sia da selectbox che da text_area)
+                if domanda_testo:  # Se c'è qualcosa nella textarea, prendi quella
+                    st.session_state.domanda_corrente = domanda_testo
+                elif st.session_state.domanda_selezionata != "---":  # Altrimenti usa la selezione
+                    st.session_state.domanda_corrente = st.session_state.domanda_selezionata
+
+            search_button = st.button(
                 "🔍 Cerca",
                 use_container_width=True,
-                disabled=st.session_state.query_in_progress
-            ):
-                st.session_state.cerca_clicked = True
+                disabled=st.session_state.query_in_progress,
+                on_click=on_cerca_click
+            )
 
-        # Mostra il progresso se una query è in corso
+        # Il resto del codice rimane invariato (gestione query in corso, polling, ecc.)
         if st.session_state.query_in_progress and st.session_state.query_id:
-
             st.markdown("### 🔄 Elaborazione")
-
             status_container = st.empty()
             progress_bar_container = st.empty()
 
@@ -885,9 +910,18 @@ class UserInterface:
                 st.error(f"Errore nel polling: {str(e)}")
                 st.session_state.query_in_progress = False
 
+        # Determina la domanda da restituire
+        domanda_to_return = ""
+        if st.session_state.cerca_clicked and hasattr(st.session_state, 'domanda_corrente'):
+            # Se è stato premuto il pulsante, usa la domanda salvata nel callback
+            domanda_to_return = st.session_state.domanda_corrente
+        else:
+            # Altrimenti usa quella nella textarea se c'è, oppure quella selezionata
+            domanda_to_return = domanda_testo or (st.session_state.domanda_selezionata if st.session_state.domanda_selezionata != "---" else "")
+
         return {
             "action": "cerca" if st.session_state.cerca_clicked else ("refresh" if st.session_state.refresh_clicked else None),
-            "domanda": domanda_input if domanda_input else domanda_selezionata,
+            "domanda": domanda_to_return,
             "force_no_cache": force_no_cache
         }
 
