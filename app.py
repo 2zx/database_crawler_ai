@@ -473,36 +473,48 @@ async def process_query_in_background(query_id, request_data):
 
         # Esegue la query e ottiene il risultato
         risposta = process_query_results(engine, sql_query, request_data.domanda, llm_config, query_progress[query_id])
-        logger.info("✅ Query eseguita con successo!")
+        if "error" in risposta:
+            logger.info("❌ Query eseguita con errori")
 
-        # Aggiunge informazioni aggiuntive alla risposta
-        risposta["query_sql"] = sql_query
-        risposta["cache_used"] = cache_used
-        risposta["llm_provider"] = request_data.llm_config.provider
-        risposta["attempts"] = attempts  # Aggiungiamo il numero di tentativi
+            # Aggiorna lo stato: completato
+            query_progress[query_id].update({
+                "status": "completed",
+                "progress": 100,
+                "message": "Analisi completata con errori",
+                "step": "completed",
+                "result": risposta
+            })
+        else:
+            logger.info("✅ Query eseguita con successo!")
 
-        # Genera automaticamente domande correlate
-        related_questions = generate_related_questions(
-            results=risposta,
-            domanda=request_data.domanda,
-            llm_config=llm_config,
-            max_questions=5
-        )
-        logger.info(f"✅ Generate {len(related_questions)} domande correlate")
-        risposta["related_questions"] = related_questions
+            # Aggiunge informazioni aggiuntive alla risposta
+            risposta["query_sql"] = sql_query
+            risposta["cache_used"] = cache_used
+            risposta["llm_provider"] = request_data.llm_config.provider
+            risposta["attempts"] = attempts  # Aggiungiamo il numero di tentativi
 
-        # Chiude il tunnel SSH
-        ssh_tunnel.stop()
-        logger.info("🔌 Tunnel SSH chiuso.")
+            # Genera automaticamente domande correlate
+            related_questions = generate_related_questions(
+                results=risposta,
+                domanda=request_data.domanda,
+                llm_config=llm_config,
+                max_questions=5
+            )
+            logger.info(f"✅ Generate {len(related_questions)} domande correlate")
+            risposta["related_questions"] = related_questions
 
-        # Aggiorna lo stato: completato
-        query_progress[query_id].update({
-            "status": "completed",
-            "progress": 100,
-            "message": "Analisi completata con successo!",
-            "step": "completed",
-            "result": risposta
-        })
+            # Chiude il tunnel SSH
+            ssh_tunnel.stop()
+            logger.info("🔌 Tunnel SSH chiuso.")
+
+            # Aggiorna lo stato: completato
+            query_progress[query_id].update({
+                "status": "completed",
+                "progress": 100,
+                "message": "Analisi completata con successo!",
+                "step": "completed",
+                "result": risposta
+            })
 
     except Exception as e:
         logger.error(f"❌ ERRORE: {traceback.format_exc()}")
@@ -549,9 +561,15 @@ def get_available_models():
             {"id": "deepseek-chat", "name": "DeepSeek Chat", "description": "Modello di chat generale"},
             {"id": "deepseek-coder", "name": "DeepSeek Coder", "description": "Specializzato per codice"}
         ],
-        "ernie": [
-            {"id": "ernie-bot-4", "name": "ERNIE Bot 4", "description": "Modello avanzato di Baidu"},
-            {"id": "ernie-bot", "name": "ERNIE Bot", "description": "Modello di base"}
+        # "ernie": [
+        #     {"id": "ernie-bot-4", "name": "ERNIE Bot 4", "description": "Modello avanzato di Baidu"},
+        #     {"id": "ernie-bot", "name": "ERNIE Bot", "description": "Modello di base"}
+        # ],
+        "gemini": [
+            {"id": "gemini-2.5-pro-preview-03-25", "name": "Gemini 2.5 Pro",
+             "description": "Ragionamento avanzato, comprensione multimodale, ampia finestra di contesto"},
+            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "description": "Modello veloce ed economico"},
+            {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro", "description": "Modello avanzato con contesto più ampio"},
         ]
     }
 

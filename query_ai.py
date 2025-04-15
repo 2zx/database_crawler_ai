@@ -69,7 +69,9 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type, hints_category):
     Riceverai una domanda posta da un utente in linguaggio naturale.
     Dovrai generare una query SQL che risponda alla domanda dell'utente restituendo **solo**
     la query SQL necessaria per ottenere la risposta senza alcuna spiegazione o testo aggiuntivo.
-    La query non deve restituire più di 100 righe di dati: crea opportuni raggruppameti o filtri senza inficiare i dati stessi.
+    La query NON DEVE restituire più di 100 righe di dati: crea opportuni raggruppameti o filtri senza inficiare i dati stessi.
+    NON restituire ID o identificatori univoci, cerca sempre le relazioni tra le tabelle per restituire dati e nomi utili
+    ad un utente umano.
     {syntax_notes}
 
     **Struttura del Database:**
@@ -431,7 +433,7 @@ def process_query_results(engine, sql_query, domanda, llm_config, progress):
         })
 
         plot_code = None
-        if "dato non disponibile" not in df.describe().to_string():
+        if "dato non disponibile" not in data_sample:
             # ✅ Generiamo il codice per il grafico
             plot_code = generate_plot_code(df, llm_config)
 

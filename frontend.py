@@ -52,8 +52,9 @@ LLM_PROVIDERS = {
     "openai": {"name": "OpenAI", "api_key_name": "openai_api_key", "requires_secret": False},
     "claude": {"name": "Anthropic Claude", "api_key_name": "claude_api_key", "requires_secret": False},
     "deepseek": {"name": "DeepSeek", "api_key_name": "deepseek_api_key", "requires_secret": False},
-    "ernie": {"name": "Baidu ERNIE", "api_key_name": "ernie_api_key", "requires_secret": True,
-              "secret_key_name": "ernie_secret_key"}
+    # "ernie": {"name": "Baidu ERNIE", "api_key_name": "ernie_api_key", "requires_secret": True,
+    #           "secret_key_name": "ernie_secret_key"},
+    "gemini": {"name": "Google Gemini", "api_key_name": "gemini_api_key", "requires_secret": False}
 }
 
 # temp
@@ -775,7 +776,7 @@ class UserInterface:
             selected = st.session_state.domanda_selector
             st.session_state.domanda_selezionata = selected
 
-        domanda_selezionata = st.selectbox(
+        st.selectbox(
             "Seleziona una domanda",
             ["---"] + domande,
             key="domanda_selector",
@@ -836,7 +837,7 @@ class UserInterface:
                 elif st.session_state.domanda_selezionata != "---":  # Altrimenti usa la selezione
                     st.session_state.domanda_corrente = st.session_state.domanda_selezionata
 
-            search_button = st.button(
+            st.button(
                 "🔍 Cerca",
                 use_container_width=True,
                 disabled=st.session_state.query_in_progress,
@@ -888,11 +889,12 @@ class UserInterface:
                     if status in ["completed", "failed", "error"]:
                         st.session_state.query_in_progress = False
 
-                        if status == "completed" and "result" in status_data:
+                        if "error" in status_data:
+                            st.error(f"❌ {status_data['error']}")
+                        elif status == "completed" and "result" in status_data:
                             result_data = status_data["result"]
                             ResultVisualizer.display_results(result_data)
-                        elif "error" in status_data:
-                            st.error(f"❌ {status_data['error']}")
+
                         if "error_traceback" in status_data:
                             with st.expander("Dettagli errore"):
                                 st.code(status_data["error_traceback"])
@@ -917,7 +919,8 @@ class UserInterface:
             domanda_to_return = st.session_state.domanda_corrente
         else:
             # Altrimenti usa quella nella textarea se c'è, oppure quella selezionata
-            domanda_to_return = domanda_testo or (st.session_state.domanda_selezionata if st.session_state.domanda_selezionata != "---" else "")
+            domanda_to_return = domanda_testo or (
+                st.session_state.domanda_selezionata if st.session_state.domanda_selezionata != "---" else "")
 
         return {
             "action": "cerca" if st.session_state.cerca_clicked else ("refresh" if st.session_state.refresh_clicked else None),
@@ -1368,10 +1371,6 @@ def main():
 
     # Logout nella sidebar
     auth_manager.logout()
-
-    # Debugging dello stato della sessione (opzionale)
-    # st.sidebar.write("Debug - query_in_progress:", st.session_state.get("query_in_progress", False))
-    # st.sidebar.write("Debug - query_id:", st.session_state.get("query_id", None))
 
     # Rendering della sidebar
     ui.render_sidebar()

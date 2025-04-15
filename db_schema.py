@@ -151,8 +151,6 @@ def get_db_schema(engine, db_type, force_refresh=False):
     cache_data = get_cached_db_schema()
     cache_data[db_type] = clean_db_schema(schema_info)
 
-    logger.info(f"chiavi {cache_data.keys()}")
-
     with open(DB_SCHEMA_CACHE_PATH, "w") as file:
         json.dump(cache_data, file, indent=2)
 
