@@ -1,50 +1,45 @@
-import base64
-import io
+"""
+Modulo per la generazione e l'esecuzione di query SQL basate su linguaggio naturale.
+Gestisce il flusso completo dalla domanda alla generazione della query,
+alla sua esecuzione e l'analisi dei risultati.
+"""
+import os
 import math
+import time
 import pandas as pd  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
-import os
-import time
-from sqlalchemy.sql import text  # type: ignore
+from sqlalchemy.sql import text   # type: ignore
 from sqlalchemy.exc import SQLAlchemyError  # type: ignore
-from query_cache import get_cached_query, save_query_to_cache, delete_cached_query
-from hint_manager import format_hints_for_prompt
-import logging
-from llm_manager import get_llm_instance
-from config import CHARTS_DIR
+from backend.utils.logging import get_logger
+from backend.utils.helpers import clean_query, clean_generated_code
+from backend.core.llm_manager import get_llm_instance
+from backend.config import CHARTS_DIR, MAX_QUERY_ATTEMPTS, MAX_TOKEN_DEFAULT
 
-# Configura il logging per vedere gli errori nel container
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Ora supportiamo diversi LLM
-LLM_INSTANCE = None
-DEFAULT_MAX_TOKENS = 1000
+# Configura il logging
+logger = get_logger(__name__)
 
 
-def encode_figure_to_base64(fig):
-    """
-    Converte un oggetto Matplotlib Figure in una stringa Base64 per inviarlo al frontend.
-    """
-    img_bytes = io.BytesIO()
-    fig.savefig(img_bytes, format="png", bbox_inches="tight")
-    img_bytes.seek(0)
-    return base64.b64encode(img_bytes.read()).decode("utf-8")
-
-
-def generate_sql_query(domanda, db_schema, llm_config, db_type, hints_category):
+def generate_sql_query(domanda, db_schema, llm_config, db_type, hints_category=None):
     """
     Genera una query SQL basata sulla domanda dell'utente e sulla struttura del database.
 
-    :param domanda: La domanda dell'utente in linguaggio naturale
-    :param db_schema: Dizionario contenente la struttura del database (tabelle, colonne, chiavi esterne)
-    :param llm_config: Configurazione del LLM (provider, api_key, ecc.)
-    :param db_type: Tipo di database ("postgresql" o "sqlserver")
-    :return: Una query SQL generata dall'AI
-    """
+    Args:
+        domanda (str): La domanda dell'utente in linguaggio naturale
+        db_schema (dict): Dizionario contenente la struttura del database
+        llm_config (dict): Configurazione del LLM (provider, api_key, ecc.)
+        db_type (str): Tipo di database ("postgresql" o "sqlserver")
+        hints_category (str, optional): Categoria di hint da utilizzare
 
+    Returns:
+        str: Una query SQL generata dall'AI
+    """
     # Otteniamo gli hint attivi formattati per il prompt
-    formatted_hints = format_hints_for_prompt(hints_category)
+    formatted_hints = ""
+    if hints_category:
+        from backend.db.hint_store import HintStore
+        hint_store = HintStore()
+        formatted_hints = hint_store.format_hints_for_prompt(hints_category)
+
     hints_section = f"\n\n{formatted_hints}\n" if formatted_hints else ""
 
     # Adatta il prompt in base al tipo di database
@@ -94,7 +89,7 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type, hints_category):
         # Ottieni l'istanza LLM appropriata
         llm_instance = get_llm_instance(provider, llm_config)
 
-        logger.info(f"🔍 Generazione della query SQL con prompt: {prompt_sql}")
+        logger.info(f"🔍 Generazione della query SQL con {provider}")
 
         # Genera la query SQL
         sql_query = llm_instance.generate_query(prompt_sql)
@@ -106,9 +101,31 @@ def generate_sql_query(domanda, db_schema, llm_config, db_type, hints_category):
         return None
 
 
+def try_query_execution(db_type, query, connection):
+    """
+    Prova a eseguire una query in modalità preview (senza recuperare risultati).
+
+    Args:
+        db_type (str): Tipo di database
+        query (str): Query SQL da testare
+        connection: Connessione al database
+
+    Raises:
+        Exception: Se la query non è valida
+    """
+    if db_type == 'postgresql':
+        connection.execute(text("EXPLAIN " + query))
+    elif db_type == 'sqlserver':
+        connection.execute(text("SET SHOWPLAN_ALL ON;"))
+        connection.execute(text(query))
+        connection.execute(text("SET SHOWPLAN_ALL OFF;"))
+    else:
+        raise ValueError(f"Tipo di database non supportato: {db_type}")
+
+
 def generate_query_with_retry(
-        domanda, db_schema, llm_config, use_cache, engine, hints_category,
-        max_attempts=3, progress_callback=None):
+        domanda, db_schema, llm_config, use_cache, engine, query_cache_manager,
+        hints_category=None, max_attempts=MAX_QUERY_ATTEMPTS, progress_callback=None):
     """
     Esegue una query SQL generata dall'AI con sistema di retry in caso di errori sintattici.
 
@@ -118,16 +135,14 @@ def generate_query_with_retry(
         llm_config (dict): Configurazione del modello LLM
         use_cache (bool): Se True, controlla prima la cache
         engine: Connessione al database SQLAlchemy
+        query_cache_manager: Gestore della cache delle query
+        hints_category (str, optional): Categoria di hint da utilizzare
         max_attempts (int): Numero massimo di tentativi
         progress_callback (func): Funzione per aggiornare il progresso
 
     Returns:
         tuple: (query_sql, cache_used, tentativi_effettuati)
-            - query_sql: L'ultima query SQL tentata
-            - cache_used: Indica se la query è stata recuperata dalla cache
-            - tentativi_effettuati: Numero di tentativi effettuati
     """
-
     # Determina il tipo di database dall'engine
     db_type = engine.dialect.name
     # Converti il nome del dialetto in 'postgresql' o 'sqlserver'
@@ -137,6 +152,10 @@ def generate_query_with_retry(
         db_type = 'sqlserver'
     else:
         db_type = 'postgresql'  # Default
+
+    # Ottieni l'hash della struttura del database corrente
+    from backend.core.db_schema import get_db_structure_hash
+    current_db_hash = get_db_structure_hash()
 
     attempts = 0
     error_history = []
@@ -157,7 +176,7 @@ def generate_query_with_retry(
             30
         )
 
-        cached_query = get_cached_query(domanda)
+        cached_query = query_cache_manager.get_cached_query(domanda, db_hash=current_db_hash)
         if cached_query:
             update_progress(
                 "cache_hit",
@@ -192,7 +211,7 @@ def generate_query_with_retry(
                 # La query dalla cache non è valida, proseguiamo con la generazione
                 logger.info(f"⚠️ Query dalla cache non valida, procedo con generazione: {str(e)}")
                 # Elimina la query non valida dalla cache
-                delete_cached_query(domanda)
+                query_cache_manager.delete_cached_query(domanda)
 
     # Base progresso: ogni tentativo vale circa il 10% del totale (40-70%)
     progress_base = 40
@@ -238,7 +257,7 @@ def generate_query_with_retry(
         # Pulisci il formato della query se necessario
         query_sql = clean_query(query_sql)
 
-        print(f"✅ Query ripulita: {query_sql}")
+        logger.info(f"✅ Query ripulita: {query_sql}")
 
         # Notifica che stiamo per eseguire la query
         update_progress(
@@ -255,8 +274,8 @@ def generate_query_with_retry(
                 try_query_execution(db_type, query_sql, connection)
                 execution_time = time.time() - start_time
 
-                print(f"✅ Anteprima query (explain) eseguita con successo al tentativo {attempts}/{max_attempts}")
-                print(f"⏱️ Tempo di esecuzione: {execution_time:.2f} secondi")
+                logger.info(f"✅ Anteprima query (explain) eseguita con successo al tentativo {attempts}/{max_attempts}")
+                logger.info(f"⏱️ Tempo di esecuzione: {execution_time:.2f} secondi")
 
                 # Notifica successo
                 update_progress(
@@ -275,7 +294,7 @@ def generate_query_with_retry(
                         progress_base + progress_per_attempt + 5
                     )
                     # Salva la query nella cache
-                    save_query_to_cache(domanda, query_sql)
+                    query_cache_manager.save_query_to_cache(domanda, query_sql, current_db_hash)
 
                 # La query è stata eseguita con successo
                 return query_sql, False, attempts
@@ -285,7 +304,7 @@ def generate_query_with_retry(
             error_message = str(e)
             error_history.append(error_message)
 
-            print(f"❌ Tentativo {attempts}/{max_attempts} fallito con errore: {error_message}")
+            logger.warning(f"❌ Tentativo {attempts}/{max_attempts} fallito con errore: {error_message}")
 
             # Notifica errore
             update_progress(
@@ -297,9 +316,9 @@ def generate_query_with_retry(
 
             # Se questo era l'ultimo tentativo, restituisci None
             if attempts >= max_attempts:
-                print(f"⚠️ Numero massimo di tentativi ({max_attempts}) raggiunto. Impossibile eseguire la query.")
+                logger.warning(f"⚠️ Numero massimo di tentativi ({max_attempts}) raggiunto. Impossibile eseguire la query.")
 
-                delete_cached_query(domanda)  # Elimina la query dalla cache
+                query_cache_manager.delete_cached_query(domanda)  # Elimina la query dalla cache
 
                 update_progress(
                     "failed",
@@ -313,78 +332,39 @@ def generate_query_with_retry(
     return query_sql, False, attempts
 
 
-def try_query_execution(db_type, cached_query, connection):
-    if db_type == 'postgresql':
-        connection.execute(text("explain " + cached_query))
-    elif db_type == 'sqlserver':
-        connection.execute(text("SET SHOWPLAN_ALL ON;"))
-        connection.execute(text(cached_query))
-        connection.execute(text("SET SHOWPLAN_ALL OFF;"))
-    else:
-        raise ValueError(f"Tipo di database non supportato: {db_type}")
-
-
-def clean_query(query_sql):
-    """
-    Pulisce la query SQL rimuovendo eventuali markdown o formattazioni aggiuntive.
-
-    Args:
-        query_sql (str): La query SQL potenzialmente con formattazione
-
-    Returns:
-        str: La query SQL pulita
-    """
-    if not query_sql:
-        return ""
-
-    # Rimuovi i blocchi di codice markdown
-    if "```" in query_sql:
-        # Estrai la query dal blocco di codice
-        lines = query_sql.split("\n")
-        cleaned_lines = []
-        inside_code_block = False
-
-        for line in lines:
-            if line.strip().startswith("```"):
-                inside_code_block = not inside_code_block
-                continue
-
-            if inside_code_block or "```" not in query_sql:
-                cleaned_lines.append(line)
-
-        query_sql = "\n".join(cleaned_lines)
-
-    # Rimuovi eventuali prefissi "sql" all'inizio della query
-    query_sql = query_sql.strip()
-    if query_sql.lower().startswith("sql"):
-        query_sql = query_sql[3:].strip()
-
-    return query_sql
-
-
-def process_query_results(engine, sql_query, domanda, llm_config, progress):
+def process_query_results(engine, sql_query, domanda, llm_config, progress_callback=None):
     """
     Esegue la query SQL generata dall'AI, analizza i dati e restituisce una risposta leggibile.
+
+    Args:
+        engine: Connessione SQLAlchemy al database
+        sql_query (str): Query SQL da eseguire
+        domanda (str): Domanda originale dell'utente
+        llm_config (dict): Configurazione del modello LLM
+        progress_callback (func, optional): Callback per aggiornare il progresso
+
+    Returns:
+        dict: Risultato dell'analisi con dati, descrizione e grafici
     """
     try:
+        if progress_callback:
+            progress_callback.update({
+                "status": "processing",
+                "progress": 70,
+                "message": "Esecuzione query...",
+                "step": "execute_sql"
+            })
 
-        progress.update({
-            "status": "processing",
-            "progress": 70,
-            "message": "Esecuzione query...",
-            "step": "execute_sql"
-        })
-
-        # ✅ Connessione corretta con SQLAlchemy 2.0
+        # Connessione corretta con SQLAlchemy
         with engine.connect() as connection:
-            df = pd.read_sql(text(sql_query), connection)  # ✅ Usa text() e connection
+            df = pd.read_sql(text(sql_query), connection)
 
         if df.empty:
             return {
                 "descrizione": "⚠️ Nessun dato trovato.", "dati": [], "grafici": []
-            }  # ✅ Risposta predefinita se non ci sono dati
+            }
 
-        # ✅ Convertiamo le colonne datetime in UTC
+        # Convertiamo le colonne datetime in UTC
         for col in df.select_dtypes(include=["datetime64", "object"]).columns:
             try:
                 df[col] = pd.to_datetime(df[col], utc=True)
@@ -416,30 +396,32 @@ def process_query_results(engine, sql_query, domanda, llm_config, progress):
         a livello globale evidenziando all'utente che stai usando dati pubblici.
         """
 
-        progress.update({
-            "status": "processing",
-            "progress": 80,
-            "message": "Analisi risultati...",
-            "step": "process_results"
-        })
+        if progress_callback:
+            progress_callback.update({
+                "status": "processing",
+                "progress": 80,
+                "message": "Analisi risultati...",
+                "step": "process_results"
+            })
 
         risposta = llm_instance.generate_analysis(analysis_prompt)
 
-        progress.update({
-            "status": "processing",
-            "progress": 90,
-            "message": "Creazione visualizzazioni...",
-            "step": "generate_charts"
-        })
+        if progress_callback:
+            progress_callback.update({
+                "status": "processing",
+                "progress": 90,
+                "message": "Creazione visualizzazioni...",
+                "step": "generate_charts"
+            })
 
         plot_code = None
         if "dato non disponibile" not in data_sample:
-            # ✅ Generiamo il codice per il grafico
+            # Generiamo il codice per il grafico
             plot_code = generate_plot_code(df, llm_config)
 
         path_grafico = ""
         if plot_code:
-            path_grafico = execute_generated_plot_code(plot_code)  # ✅ Eseguiamo il codice per generare il grafico
+            path_grafico = execute_generated_plot_code(plot_code)
 
         # Prima di restituire la risposta, sanitizza i valori float
         sanitized_data = []
@@ -472,8 +454,14 @@ def process_query_results(engine, sql_query, domanda, llm_config, progress):
 def generate_plot_code(df, llm_config):
     """
     Chiede all'AI di generare codice Matplotlib basato sui dati.
-    """
 
+    Args:
+        df (pandas.DataFrame): DataFrame con i dati
+        llm_config (dict): Configurazione del modello LLM
+
+    Returns:
+        str: Codice Python per la generazione del grafico
+    """
     prompt = f"""
     Genera più grafici Matplotlib identificando multipli KPI per visualizzare i seguenti dati:
     {df.head().to_string()}
@@ -496,9 +484,9 @@ def generate_plot_code(df, llm_config):
 
         # Genera il codice per il grafico
         plot_code = llm_instance.generate_query(prompt)
-        plot_code = clean_generated_code(plot_code)  # ✅ Rimuoviamo ```python e ```
+        plot_code = clean_generated_code(plot_code)  # Rimuoviamo ```python e ```
 
-        # ✅ Salviamo il codice in un file Python per debugging
+        # Salviamo il codice in un file Python per debugging
         with open(f"{CHARTS_DIR}/generated_plot.py", "w") as f:
             f.write(plot_code)
 
@@ -508,30 +496,26 @@ def generate_plot_code(df, llm_config):
         return None
 
 
-def clean_generated_code(code):
-    """
-    Rimuove le righe ` ```python ` e ` ``` ` dal codice generato.
-    """
-    lines = code.strip().split("\n")
-
-    # ✅ Se il codice inizia con ```python, rimuoviamo la prima riga
-    if lines[0].startswith("```"):
-        lines = lines[1:]
-
-    # ✅ Se il codice termina con ```, rimuoviamo l'ultima riga
-    if lines[-1].startswith("```"):
-        lines = lines[:-1]
-
-    return "\n".join(lines)
-
-
 def execute_generated_plot_code(plot_code):
     """
     Esegue il codice Matplotlib generato dall'AI in un ambiente sicuro.
+
+    Args:
+        plot_code (str): Codice Python da eseguire
+
+    Returns:
+        str: Percorso del file salvato o messaggio di errore
     """
     try:
         logger.info("📊 Esecuzione del codice generato per il grafico")
-        exec(plot_code, {"plt": plt, "pd": pd})
+
+        # Assicurati che la directory esista
+        os.makedirs(CHARTS_DIR, exist_ok=True)
+
+        # Esegui il codice in un ambiente isolato
+        local_vars = {"plt": plt, "pd": pd}
+        exec(plot_code, {"plt": plt, "pd": pd}, local_vars)
+
         logger.info("📊 Esecuzione OK")
         return os.path.join(CHARTS_DIR, "generated_plot.png")
     except Exception as e:

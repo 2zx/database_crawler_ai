@@ -118,7 +118,7 @@ class UserInterface:
 
     def render_connection_settings(self):
         """Visualizza le impostazioni di connessione nella sidebar."""
-        from connection_profiles import ConnectionProfileManager
+        from frontend.utils.connection_profiles import ConnectionProfileManager
         from frontend.config import PROFILES_FILE
 
         profile_manager = ConnectionProfileManager(PROFILES_FILE)

@@ -1,18 +1,17 @@
 """
-Gestore per diversi modelli LLM (OpenAI, Claude, DeepSeek, Baidu ERNIE).
+Gestore per diversi modelli LLM (OpenAI, Claude, DeepSeek, Gemini).
 Fornisce un'interfaccia unificata per generare query SQL.
 """
 import httpx  # type: ignore
-import logging
 import re
 from abc import ABC, abstractmethod
 from openai import OpenAI  # type: ignore
 from anthropic import Anthropic  # type: ignore
-# Nota: DeepSeek non ha una libreria Python ufficiale, usiamo httpx per le chiamate API
-# import ernie  # Importa la libreria per Baidu ERNIE
+from backend.utils.logging import get_logger
+from backend.config import DEFAULT_LLM_MODELS
 
 # Configura il logging
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BaseLLM(ABC):
@@ -65,16 +64,16 @@ class BaseLLM(ABC):
 class OpenAILLM(BaseLLM):
     """Implementazione LLM per OpenAI."""
 
-    def __init__(self, api_key, model="gpt-4o-mini"):
+    def __init__(self, api_key, model=None):
         """
         Inizializza il client OpenAI.
 
         Args:
             api_key (str): Chiave API OpenAI
-            model (str): Nome del modello da utilizzare
+            model (str, optional): Nome del modello da utilizzare
         """
         self.client = OpenAI(api_key=api_key)
-        self.model = model
+        self.model = model or DEFAULT_LLM_MODELS["openai"]
 
     def generate_query(self, prompt, max_tokens=1000):
         """Genera una query SQL usando OpenAI."""
@@ -158,16 +157,16 @@ class OpenAILLM(BaseLLM):
 class ClaudeLLM(BaseLLM):
     """Implementazione LLM per Anthropic Claude."""
 
-    def __init__(self, api_key, model="claude-3-haiku-20240307"):
+    def __init__(self, api_key, model=None):
         """
         Inizializza il client Claude.
 
         Args:
             api_key (str): Chiave API Anthropic
-            model (str): Nome del modello da utilizzare
+            model (str, optional): Nome del modello da utilizzare
         """
         self.client = Anthropic(api_key=api_key)
-        self.model = model
+        self.model = model or DEFAULT_LLM_MODELS["claude"]
 
     def generate_query(self, prompt, max_tokens=1000):
         """Genera una query SQL usando Claude."""
@@ -250,17 +249,17 @@ class ClaudeLLM(BaseLLM):
 class DeepSeekLLM(BaseLLM):
     """Implementazione LLM per DeepSeek usando l'API REST."""
 
-    def __init__(self, api_key, model="deepseek-chat"):
+    def __init__(self, api_key, model=None):
         """
         Inizializza il client DeepSeek.
 
         Args:
             api_key (str): Chiave API DeepSeek
-            model (str): Nome del modello da utilizzare
+            model (str, optional): Nome del modello da utilizzare
         """
         self.api_key = api_key
-        self.model = model
-        self.api_url = "https://api.deepseek.com/v1/chat/completions"  # Endpoint API (da verificare)
+        self.model = model or DEFAULT_LLM_MODELS["deepseek"]
+        self.api_url = "https://api.deepseek.com/v1/chat/completions"  # Endpoint API
 
     def _make_request(self, messages, max_tokens=1000, temperature=0.7):
         """Effettua una richiesta all'API DeepSeek."""
@@ -305,7 +304,7 @@ class DeepSeekLLM(BaseLLM):
 
             response = self._make_request(messages, max_tokens, 0.3)
 
-            # Estrai il testo dalla risposta (struttura da adattare in base all'API reale)
+            # Estrai il testo dalla risposta
             return response.get("choices", [{}])[0].get("message", {}).get("content", "")
         except Exception as e:
             logger.error(f"❌ Errore DeepSeek durante la generazione della query: {e}")
@@ -321,7 +320,7 @@ class DeepSeekLLM(BaseLLM):
 
             response = self._make_request(messages, max_tokens)
 
-            # Estrai il testo dalla risposta (struttura da adattare in base all'API reale)
+            # Estrai il testo dalla risposta
             return response.get("choices", [{}])[0].get("message", {}).get("content", "")
         except Exception as e:
             logger.error(f"❌ Errore DeepSeek durante la generazione della analisi: {e}")
@@ -350,7 +349,7 @@ class DeepSeekLLM(BaseLLM):
 
             response = self._make_request(messages, 1000, 0.7)
 
-            # Estrai il testo dalla risposta (struttura da adattare in base all'API reale)
+            # Estrai il testo dalla risposta
             result = response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
 
             # Elaborazione della risposta per estrarre solo le domande
@@ -372,159 +371,23 @@ class DeepSeekLLM(BaseLLM):
             return []
 
 
-class ErnieLLM(BaseLLM):
-    """Implementazione LLM per Baidu ERNIE."""
-
-    def __init__(self, api_key, secret_key, model="ernie-bot-4"):
-        """
-        Inizializza il client ERNIE.
-
-        Args:
-            api_key (str): Chiave API Baidu
-            secret_key (str): Chiave segreta Baidu
-            model (str): Nome del modello da utilizzare
-        """
-        self.api_key = api_key
-        self.secret_key = secret_key
-        self.model = model
-        self.api_url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions"
-        self.access_token = self._get_access_token()
-
-    def _get_access_token(self):
-        """Ottiene un token di accesso valido da Baidu."""
-        url = f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={self.api_key}&client_secret={self.secret_key}"  # noqa: E501
-
-        try:
-            response = httpx.post(url)
-            if response.status_code == 200:
-                return response.json().get("access_token")
-            else:
-                logger.error(f"❌ Errore nel recupero del token Baidu: {response.text}")
-                raise Exception(f"Errore nel recupero del token Baidu: {response.text}")
-        except Exception as e:
-            logger.error(f"❌ Errore nella richiesta del token Baidu: {e}")
-            raise Exception(f"Errore nella richiesta del token Baidu: {str(e)}")
-
-    def _make_request(self, messages):
-        """Effettua una richiesta all'API ERNIE."""
-        headers = {
-            "Content-Type": "application/json"
-        }
-
-        params = {
-            "access_token": self.access_token
-        }
-
-        payload = {
-            "messages": messages,
-            "model": self.model
-        }
-
-        try:
-            response = httpx.post(
-                self.api_url,
-                headers=headers,
-                params=params,
-                json=payload
-            )
-
-            if response.status_code == 200:
-                return response.json()
-            else:
-                logger.error(f"❌ Errore nella richiesta ERNIE: {response.text}")
-                raise Exception(f"Errore nella richiesta ERNIE: {response.text}")
-        except Exception as e:
-            logger.error(f"❌ Errore nella richiesta ERNIE: {e}")
-            raise Exception(f"Errore nella richiesta ERNIE: {str(e)}")
-
-    def generate_query(self, prompt, max_tokens=1000):
-        """Genera una query SQL usando ERNIE."""
-        try:
-            messages = [
-                {"role": "system", "content": "Sei un assistente SQL esperto."},
-                {"role": "user", "content": prompt}
-            ]
-
-            response = self._make_request(messages)
-            return response.get("result", "")
-        except Exception as e:
-            logger.error(f"❌ Errore ERNIE durante la generazione della query: {e}")
-            raise Exception(f"Errore ERNIE: {str(e)}")
-
-    def generate_analysis(self, prompt, max_tokens=1000):
-        """Genera un'analisi dei dati usando ERNIE."""
-        try:
-            messages = [
-                {"role": "system", "content": "Sei un esperto di analisi dati."},
-                {"role": "user", "content": prompt}
-            ]
-
-            response = self._make_request(messages)
-            return response.get("result", "")
-        except Exception as e:
-            logger.error(f"❌ Errore ERNIE durante la generazione dell'analisi: {e}")
-            raise Exception(f"Errore ERNIE: {str(e)}")
-
-    def generate_related_questions(self, context, results, max_questions=5):
-        """Genera domande correlate usando ERNIE."""
-        try:
-            prompt = f"""
-            Basandoti sulla seguente analisi di dati, genera {max_questions} domande di approfondimento
-            che l'utente potrebbe voler fare successivamente.
-            Le domande devono essere specifiche, correlate ai dati analizzati, e aiutare l'utente
-            a esplorare ulteriormente i dati o a scoprire nuovi insights.
-
-            {context}
-
-            Restituisci solo un elenco di domande numerate, una per riga, senza ulteriori spiegazioni.
-            Le domande devono essere formulate in italiano e in modo chiaro e conciso.
-            """
-
-            messages = [
-                {"role": "system",
-                 "content": "Sei un esperto di analisi dati che suggerisce domande di approfondimento pertinenti."},
-                {"role": "user", "content": prompt}
-            ]
-
-            response = self._make_request(messages)
-            result = response.get("result", "").strip()
-
-            # Elaborazione della risposta per estrarre solo le domande
-            questions = []
-            for line in result.split('\n'):
-                # Rimuovi numerazione e altri caratteri
-                line = line.strip()
-                if line:
-                    # Rimuovi numerazione (es. "1. ", "1) ", ecc.)
-                    cleaned_line = re.sub(r'^\d+[\.\)\-]\s*', '', line)
-                    if cleaned_line:
-                        questions.append(cleaned_line)
-
-            # Limita al numero massimo richiesto
-            return questions[:max_questions]
-
-        except Exception as e:
-            logger.error(f"❌ Errore ERNIE durante la generazione delle domande correlate: {e}")
-            return []
-
-
 class GeminiLLM(BaseLLM):
     """Implementazione LLM per Google Gemini usando l'API REST con formato chat."""
 
-    def __init__(self, api_key, model="gemini-pro"):
+    def __init__(self, api_key, model=None):
         """
         Inizializza il client Gemini.
 
         Args:
             api_key (str): Chiave API Google Gemini
-            model (str): Nome del modello da utilizzare (default: "gemini-pro")
+            model (str, optional): Nome del modello da utilizzare
         """
         self.api_key = api_key
-        self.model = model
+        self.model = model or DEFAULT_LLM_MODELS["gemini"]
         # Utilizziamo l'endpoint chat per mantenere il contesto
-        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         self.chat_history = []
-        logger.info(f"Inizializzato Gemini LLM con model={model} e supporto chat")
+        logger.info(f"Inizializzato Gemini LLM con model={self.model} e supporto chat")
 
     def _make_chat_request(self, messages, max_tokens=1000, temperature=0.7):
         """
@@ -638,7 +501,8 @@ class GeminiLLM(BaseLLM):
         try:
             # Prepara i messaggi per la chat
             messages = [
-                {"role": "system", "content": "Sei un assistente SQL esperto. Genera SOLO la query SQL corretta senza spiegazioni aggiuntive."}
+                {"role": "system",
+                 "content": "Sei un assistente SQL esperto. Genera SOLO la query SQL corretta senza spiegazioni aggiuntive."}
             ]
 
             # Aggiungi la cronologia della chat (senza i messaggi di sistema)
@@ -718,7 +582,8 @@ class GeminiLLM(BaseLLM):
 
             # Prepara i messaggi per la chat
             messages = [
-                {"role": "system", "content": "Sei un esperto di analisi dati che suggerisce domande di approfondimento pertinenti."},
+                {"role": "system",
+                 "content": "Sei un esperto di analisi dati che suggerisce domande di approfondimento pertinenti."},
                 {"role": "user", "content": prompt}
             ]
 
@@ -761,7 +626,7 @@ def get_llm_instance(provider, config):
     Factory per creare l'istanza LLM appropriata in base al provider.
 
     Args:
-        provider (str): Il provider LLM (openai, claude, deepseek, ernie)
+        provider (str): Il provider LLM (openai, claude, deepseek, gemini)
         config (dict): Configurazione per il provider
 
     Returns:
@@ -770,29 +635,22 @@ def get_llm_instance(provider, config):
     if provider.lower() == "openai":
         return OpenAILLM(
             api_key=config.get("api_key"),
-            model=config.get("model", "gpt-4o-mini")
+            model=config.get("model")
         )
     elif provider.lower() == "claude":
         return ClaudeLLM(
             api_key=config.get("api_key"),
-            model=config.get("model", "claude-3-haiku-20240307")
+            model=config.get("model")
         )
     elif provider.lower() == "deepseek":
         return DeepSeekLLM(
             api_key=config.get("api_key"),
-            model=config.get("model", "deepseek-chat")
-        )
-    elif provider.lower() == "ernie":
-        return ErnieLLM(
-            api_key=config.get("api_key"),
-            secret_key=config.get("secret_key"),
-            model=config.get("model", "ernie-bot-4")
+            model=config.get("model")
         )
     elif provider.lower() == "gemini":
         return GeminiLLM(
             api_key=config.get("api_key"),
-            model=config.get("model", "gemini-pro")
+            model=config.get("model")
         )
     else:
         raise ValueError(f"Provider LLM non supportato: {provider}")
-

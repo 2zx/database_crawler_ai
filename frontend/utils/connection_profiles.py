@@ -4,12 +4,11 @@ Permette di salvare, caricare ed eliminare configurazioni di connessione riutili
 """
 import os
 import json
-import logging
+from backend.utils.logging import get_logger
 from typing import Dict, List, Optional, Any
 
-# Configura il logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 
 class ConnectionProfileManager:
