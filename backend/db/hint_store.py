@@ -237,8 +237,11 @@ class HintStore:
                     "hint_category": hint.hint_category,
                     "active": hint.active
                 }
-                for hint in hints if (filter_hint_category is None or
-                                      hint.hint_category in [filter_hint_category, "generale"])
+                for hint in hints if (
+                    filter_hint_category is None or hint.hint_category in [
+                        filter_hint_category, "generale"
+                    ]
+                )
             ]
         except Exception as e:
             logger.error(f"❌ Errore nel recupero degli hint attivi: {e}")
