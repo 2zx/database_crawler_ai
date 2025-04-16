@@ -304,7 +304,7 @@ class UserInterface:
         if "test_result" in st.session_state:
             result = st.session_state.test_result
             if result.get("ssh_success") and result.get("db_success"):
-                st.success("✅ Connessione completata con successo!")
+                pass
             else:
                 if not result.get("ssh_success"):
                     st.error(f"❌ Errore SSH: {result.get('ssh_error', 'Errore sconosciuto')}")

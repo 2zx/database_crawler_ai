@@ -69,7 +69,13 @@ class ResultVisualizer:
                 with col1:
                     st.write(f"{i+1}. {question}")
                 with col2:
-                    if st.button("🔍", key=f"explore_{i}"):
+                    # Usiamo un key univoco per ogni bottone
+                    button_key = f"explore_{i}_{hash(question)}"
+                    if st.button("🔍", key=button_key):
                         # Imposta questa domanda come la nuova domanda di ricerca
                         st.session_state.new_question = question
                         st.session_state.run_new_question = True
+                        # Imposta anche direttamente la domanda selezionata
+                        st.session_state.domanda_selezionata = question
+                        # Forza rerun per applicare immediatamente le modifiche
+                        st.rerun()

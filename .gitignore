@@ -182,3 +182,4 @@ db_schema.json
 cache/*
 exports/*
 charts/*.py
+charts/*.png

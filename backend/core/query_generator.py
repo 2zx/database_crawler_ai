@@ -415,13 +415,48 @@ def process_query_results(engine, sql_query, domanda, llm_config, progress_callb
             })
 
         plot_code = None
-        if "dato non disponibile" not in data_sample:
-            # Generiamo il codice per il grafico
-            plot_code = generate_plot_code(df, llm_config)
-
         path_grafico = ""
-        if plot_code:
-            path_grafico = execute_generated_plot_code(plot_code)
+        max_retries = 5
+        attempts = 0
+        error_history = []
+
+        if "dato non disponibile" not in data_sample:
+            while attempts < max_retries:
+                attempts += 1
+                try:
+                    # Generiamo il codice per il grafico
+                    error_context = ""
+                    if error_history:
+                        error_context = "\n\nErrore precedente nella generazione del grafico: " + \
+                            f"\n{error_history[-1]}\n" + \
+                            "Correggi l'errore e genera un codice valido per il grafico."
+
+                    plot_code = generate_plot_code(df, llm_config, error_context)
+
+                    if not plot_code:
+                        raise ValueError("Codice per il grafico non generato.")
+
+                    # Eseguiamo il codice generato
+                    path_grafico = execute_generated_plot_code(plot_code)
+
+                    # Se l'esecuzione è andata a buon fine, usciamo dal ciclo
+                    if os.path.exists(path_grafico):
+                        break
+
+                except Exception as e:
+                    error_message = str(e)
+                    error_history.append(error_message)
+                    logger.warning(
+                        f"❌ Tentativo {attempts}/{max_retries} fallito nella generazione/esecuzione del grafico: {error_message}"
+                    )
+
+                    # Se raggiunto il numero massimo di tentativi, logghiamo l'errore
+                    if attempts >= max_retries:
+                        logger.error(
+                            f"⚠️ Numero massimo di tentativi ({max_retries}) raggiunto. Impossibile generare il grafico."
+                        )
+                        path_grafico = None
+                        break
 
         # Prima di restituire la risposta, sanitizza i valori float
         sanitized_data = []
@@ -451,7 +486,7 @@ def process_query_results(engine, sql_query, domanda, llm_config, progress_callb
         }
 
 
-def generate_plot_code(df, llm_config):
+def generate_plot_code(df, llm_config, errors):
     """
     Chiede all'AI di generare codice Matplotlib basato sui dati.
 
@@ -474,26 +509,23 @@ def generate_plot_code(df, llm_config):
     - Tenere in considerazione le istruzioni per l'interpretazione dei dati.
 
     Ritorna SOLO il codice Python, senza commenti o altro.
+    {errors if errors else ""}
     """
 
     provider = llm_config.get("provider", "openai")
 
-    try:
-        # Ottieni l'istanza LLM appropriata
-        llm_instance = get_llm_instance(provider, llm_config)
+    # Ottieni l'istanza LLM appropriata
+    llm_instance = get_llm_instance(provider, llm_config)
 
-        # Genera il codice per il grafico
-        plot_code = llm_instance.generate_query(prompt)
-        plot_code = clean_generated_code(plot_code)  # Rimuoviamo ```python e ```
+    # Genera il codice per il grafico
+    plot_code = llm_instance.generate_query(prompt)
+    plot_code = clean_generated_code(plot_code)  # Rimuoviamo ```python e ```
 
-        # Salviamo il codice in un file Python per debugging
-        with open(f"{CHARTS_DIR}/generated_plot.py", "w") as f:
-            f.write(plot_code)
+    # Salviamo il codice in un file Python per debugging
+    with open(f"{CHARTS_DIR}/generated_plot.py", "w") as f:
+        f.write(plot_code)
 
-        return plot_code
-    except Exception as e:
-        logger.error(f"❌ Errore nella generazione del codice del grafico: {str(e)}")
-        return None
+    return plot_code
 
 
 def execute_generated_plot_code(plot_code):
@@ -506,21 +538,17 @@ def execute_generated_plot_code(plot_code):
     Returns:
         str: Percorso del file salvato o messaggio di errore
     """
-    try:
-        logger.info("📊 Esecuzione del codice generato per il grafico")
+    logger.info("📊 Esecuzione del codice generato per il grafico")
 
-        # Assicurati che la directory esista
-        os.makedirs(CHARTS_DIR, exist_ok=True)
+    # Assicurati che la directory esista
+    os.makedirs(CHARTS_DIR, exist_ok=True)
 
-        # Esegui il codice in un ambiente isolato
-        local_vars = {"plt": plt, "pd": pd}
-        exec(plot_code, {"plt": plt, "pd": pd}, local_vars)
+    # Esegui il codice in un ambiente isolato
+    local_vars = {"plt": plt, "pd": pd}
+    exec(plot_code, {"plt": plt, "pd": pd}, local_vars)
 
-        logger.info("📊 Esecuzione OK")
-        return os.path.join(CHARTS_DIR, "generated_plot.png")
-    except Exception as e:
-        logger.error(f"Errore nell'esecuzione del codice generato: {e}")
-        return f"Errore nell'esecuzione del codice generato: {e}"
+    logger.info("📊 Esecuzione OK")
+    return os.path.join(CHARTS_DIR, "generated_plot.png")
 
 
 def generate_related_questions(results, domanda, llm_config, max_questions=3):

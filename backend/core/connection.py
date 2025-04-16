@@ -5,6 +5,7 @@ import io
 import paramiko  # type: ignore[import]
 from sshtunnel import SSHTunnelForwarder  # type: ignore[import]
 from sqlalchemy import create_engine  # type: ignore[import]
+from sqlalchemy.sql import text   # type: ignore
 from backend.utils.logging import get_logger
 
 
@@ -147,7 +148,7 @@ class ConnectionManager:
 
                 # Tentiamo una semplice query per verificare che funzioni
                 with engine.connect() as connection:
-                    connection.execute("SELECT 1")
+                    connection.execute(text("SELECT 1"))
 
                 result["db_success"] = True
             except Exception as e:

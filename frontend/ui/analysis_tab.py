@@ -39,10 +39,14 @@ class AnalysisTab:
         # Controlla se c'è una nuova domanda da eseguire dalle domande correlate
         if hasattr(st.session_state, 'run_new_question') and st.session_state.run_new_question:
             st.session_state.run_new_question = False
-            # Aggiorniamo direttamente session_state.domanda_selezionata
-            st.session_state.domanda_selezionata = st.session_state.new_question
-            # Cancella la domanda dopo averla usata
-            del st.session_state.new_question
+            # Aggiorniamo direttamente session_state.domanda_selezionata e domanda_corrente
+            if hasattr(st.session_state, 'new_question'):
+                st.session_state.domanda_selezionata = st.session_state.new_question
+                st.session_state.domanda_corrente = st.session_state.new_question
+                # Trigger cercare automaticamente la nuova domanda
+                st.session_state.cerca_clicked = True
+                # Cancella la domanda dopo averla usata
+                del st.session_state.new_question
 
         # Mostra il provider LLM attualmente selezionato
         provider = self.credentials_manager.credentials.get("llm_provider", "openai")
