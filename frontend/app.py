@@ -85,10 +85,13 @@ def main():
                         time.sleep(0.5)
                         st.rerun()
                     else:
+                        st.session_state.query_in_progress = False
                         st.error(f"❌ Errore nell'elaborazione della richiesta: {response.text}")
                 except Exception as e:
+                    st.session_state.query_in_progress = False
                     st.error(f"❌ Errore nella comunicazione col backend: {str(e)}")
             else:
+                st.session_state.query_in_progress = False
                 st.warning("Per favore, inserisci una domanda da analizzare.")
 
         # Gestione dell'azione "Riscansiona Database"

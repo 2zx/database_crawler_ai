@@ -171,7 +171,6 @@ class AnalysisTab:
 
                     if status in ["completed", "failed", "error"]:
                         st.session_state.query_in_progress = False
-                        st.session_state.cerca_clicked = False
 
                         if "error" in status_data:
                             st.error(f"❌ {status_data['error']}")

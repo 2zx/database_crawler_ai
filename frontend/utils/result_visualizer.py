@@ -74,5 +74,10 @@ class ResultVisualizer:
                     if st.button("🔍", key=button_key):
                         # Imposta direttamente la domanda
                         st.session_state.domanda_corrente = question
+
+                        # Ripulisci il selettore per evitare conflitti
+                        st.session_state.domanda_selezionata = "---"
+                        st.session_state.domanda_selector = "---"
+
                         # Forza rerun per applicare immediatamente le modifiche
                         st.rerun()
