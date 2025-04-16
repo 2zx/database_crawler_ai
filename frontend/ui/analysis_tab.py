@@ -36,17 +36,6 @@ class AnalysisTab:
         Returns:
             dict: Dati dell'azione da eseguire
         """
-        # Controlla se c'è una nuova domanda da eseguire dalle domande correlate
-        if hasattr(st.session_state, 'run_new_question') and st.session_state.run_new_question:
-            st.session_state.run_new_question = False
-            # Aggiorniamo direttamente session_state.domanda_selezionata e domanda_corrente
-            if hasattr(st.session_state, 'new_question'):
-                st.session_state.domanda_selezionata = st.session_state.new_question
-                st.session_state.domanda_corrente = st.session_state.new_question
-                # Trigger cercare automaticamente la nuova domanda
-                st.session_state.cerca_clicked = True
-                # Cancella la domanda dopo averla usata
-                del st.session_state.new_question
 
         # Mostra il provider LLM attualmente selezionato
         provider = self.credentials_manager.credentials.get("llm_provider", "openai")
@@ -64,12 +53,15 @@ class AnalysisTab:
         # Inizializza lo stato se necessario
         if "domanda_selezionata" not in st.session_state:
             st.session_state.domanda_selezionata = "---"
+        if "domanda_corrente" not in st.session_state:
+            st.session_state.domanda_corrente = ""
 
         # Selettore domande
         # Un callback che viene attivato quando cambia la selezione
         def on_domanda_change():
             selected = st.session_state.domanda_selector
             st.session_state.domanda_selezionata = selected
+            st.session_state.domanda_corrente = selected if selected != "---" else ""
 
         st.selectbox(
             "Seleziona una domanda",
@@ -79,9 +71,7 @@ class AnalysisTab:
         )
 
         # Se la domanda selezionata è diversa da "---", la usiamo
-        domanda_da_mostrare = ""
-        if st.session_state.domanda_selezionata != "---":
-            domanda_da_mostrare = st.session_state.domanda_selezionata
+        domanda_da_mostrare = st.session_state.domanda_corrente
 
         # Modifica all'input della domanda
         domanda_testo = st.text_area(
@@ -129,8 +119,6 @@ class AnalysisTab:
                 # Salviamo la domanda corrente (sia da selectbox che da text_area)
                 if domanda_testo:  # Se c'è qualcosa nella textarea, prendi quella
                     st.session_state.domanda_corrente = domanda_testo
-                elif st.session_state.domanda_selezionata != "---":  # Altrimenti usa la selezione
-                    st.session_state.domanda_corrente = st.session_state.domanda_selezionata
 
             st.button(
                 "🔍 Cerca",
@@ -183,6 +171,7 @@ class AnalysisTab:
 
                     if status in ["completed", "failed", "error"]:
                         st.session_state.query_in_progress = False
+                        st.session_state.cerca_clicked = False
 
                         if "error" in status_data:
                             st.error(f"❌ {status_data['error']}")
@@ -212,10 +201,6 @@ class AnalysisTab:
         if st.session_state.cerca_clicked and hasattr(st.session_state, 'domanda_corrente'):
             # Se è stato premuto il pulsante, usa la domanda salvata nel callback
             domanda_to_return = st.session_state.domanda_corrente
-        else:
-            # Altrimenti usa quella nella textarea se c'è, oppure quella selezionata
-            domanda_to_return = domanda_testo or (
-                st.session_state.domanda_selezionata if st.session_state.domanda_selezionata != "---" else "")
 
         return {
             "action": "cerca" if st.session_state.cerca_clicked else ("refresh" if st.session_state.refresh_clicked else None),
