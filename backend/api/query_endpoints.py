@@ -82,6 +82,8 @@ async def process_query_in_background(query_id, request_data):
             }
         }
 
+        # raise HTTPException(status_code=500, detail="Simulazione di un errore")
+
         # Aggiorna stato: inizializzazione
         query_progress[query_id].update({
             "status": "starting",

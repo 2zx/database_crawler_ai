@@ -50,47 +50,13 @@ class AnalysisTab:
         if filter_hint_categ and filter_hint_categ in DOMANDE_SUGGERITE:
             domande = DOMANDE_SUGGERITE[filter_hint_categ]
 
-        # Inizializza lo stato se necessario
-        if "domanda_selezionata" not in st.session_state:
-            st.session_state.domanda_selezionata = "---"
+        # Inizializza lo stato domande
         if "domanda_corrente" not in st.session_state:
             st.session_state.domanda_corrente = ""
-
-        # Selettore domande
-        # Un callback che viene attivato quando cambia la selezione
-        def on_domanda_change():
-            selected = st.session_state.domanda_selector
-            st.session_state.domanda_selezionata = selected
-            st.session_state.domanda_corrente = selected if selected != "---" else ""
-
-        st.selectbox(
-            "Seleziona una domanda",
-            ["---"] + domande,
-            key="domanda_selector",
-            on_change=on_domanda_change
-        )
-
-        # Se la domanda selezionata è diversa da "---", la usiamo
-        domanda_da_mostrare = st.session_state.domanda_corrente
-
-        # Modifica all'input della domanda
-        domanda_testo = st.text_area(
-            label="Oppure scrivi una domanda libera",
-            value=domanda_da_mostrare,
-            height=200,
-            max_chars=1000,
-            help="Inserisci la tua descrizione qui. Massimo 1000 caratteri."
-        )
-
-        # Checkbox per forzare la rigenerazione della query senza cache
-        force_no_cache = st.checkbox("Forza rigenerazione query SQL (ignora cache)")
-
-        # Mostra gli hint attivi
-        active_hints = self.hint_manager.get_active_hints(filter_hint_categ)
-        if active_hints:
-            with st.expander("📝 Hint attivi per l'interpretazione dei dati", expanded=False):
-                for hint in active_hints:
-                    st.write(f"**{hint['hint_category']}**: {hint['hint_text']}")
+        if "domanda_suggerita" not in st.session_state:
+            st.session_state.domanda_suggerita = ""
+        if "domanda_selector" not in st.session_state:
+            st.session_state.domanda_selector = "---"
 
         # Inizializzazione dello stato dei pulsanti
         if "cerca_clicked" not in st.session_state:
@@ -109,6 +75,48 @@ class AnalysisTab:
             st.session_state.last_update_time = 0
         if "polling_active" not in st.session_state:
             st.session_state.polling_active = False
+
+        # Selettore domande
+        # Un callback che viene attivato quando cambia la selezione
+        def on_domanda_change():
+            logger.info(f"Domanda selezionata on_domanda_change: {st.session_state.domanda_selector}")
+            selected = st.session_state.domanda_selector
+            st.session_state.domanda_corrente = selected if selected != "---" else ""
+
+        logger.info(f"Domanda domanda_suggerita: {st.session_state.domanda_suggerita}")
+        logger.info(f"Domanda domanda_corrente: {st.session_state.domanda_corrente}")
+        logger.info(f"Domanda domanda_selector: {st.session_state.domanda_selector}")
+
+        if st.session_state.domanda_suggerita:
+            st.session_state.domanda_selector = "---"
+            st.session_state.domanda_corrente = st.session_state.domanda_suggerita
+            st.session_state.domanda_suggerita = ""
+
+        st.selectbox(
+            "Seleziona una domanda",
+            ["---"] + domande,
+            key="domanda_selector",
+            on_change=on_domanda_change
+        )
+
+        # Modifica all'input della domanda
+        domanda_testo = st.text_area(
+            label="Oppure scrivi una domanda libera",
+            height=200,
+            max_chars=1000,
+            key="domanda_corrente",
+            help="Inserisci la tua descrizione qui. Massimo 1000 caratteri."
+        )
+
+        # Checkbox per forzare la rigenerazione della query senza cache
+        force_no_cache = st.checkbox("Forza rigenerazione query SQL (ignora cache)")
+
+        # Mostra gli hint attivi
+        active_hints = self.hint_manager.get_active_hints(filter_hint_categ)
+        if active_hints:
+            with st.expander("📝 Hint attivi per l'interpretazione dei dati", expanded=False):
+                for hint in active_hints:
+                    st.write(f"**{hint['hint_category']}**: {hint['hint_text']}")
 
         # Pulsanti per le azioni
         col1, col2, col3 = st.columns([1, 1, 1])
@@ -184,7 +192,7 @@ class AnalysisTab:
 
                     else:
                         # 🔁 Ripeti polling dopo 2 secondi
-                        time.sleep(2)
+                        time.sleep(2.5)
                         st.rerun()
 
                 else:
@@ -194,15 +202,11 @@ class AnalysisTab:
             except Exception as e:
                 st.error(f"Errore nel polling: {str(e)}")
                 st.session_state.query_in_progress = False
-
-        # Determina la domanda da restituire
-        domanda_to_return = ""
-        if st.session_state.cerca_clicked and hasattr(st.session_state, 'domanda_corrente'):
-            # Se è stato premuto il pulsante, usa la domanda salvata nel callback
-            domanda_to_return = st.session_state.domanda_corrente
+                st.session_state.query_id = None
+                st.session_state.query_status = {}
 
         return {
             "action": "cerca" if st.session_state.cerca_clicked else ("refresh" if st.session_state.refresh_clicked else None),
-            "domanda": domanda_to_return,
+            "domanda": st.session_state.domanda_corrente,
             "force_no_cache": force_no_cache
         }

@@ -5,6 +5,10 @@ import pandas as pd     # type: ignore
 import streamlit as st      # type: ignore
 from io import BytesIO
 from frontend.config import LLM_PROVIDERS
+import logging
+
+# Configurazione del logging
+logger = logging.getLogger(__name__)
 
 
 class ResultVisualizer:
@@ -72,12 +76,10 @@ class ResultVisualizer:
                     # Usiamo un key univoco per ogni bottone
                     button_key = f"explore_{i}_{hash(question)}"
                     if st.button("🔍", key=button_key):
-                        # Imposta direttamente la domanda
-                        st.session_state.domanda_corrente = question
 
-                        # Ripulisci il selettore per evitare conflitti
-                        st.session_state.domanda_selezionata = "---"
-                        st.session_state.domanda_selector = "---"
+                        # Imposta direttamente la domanda
+                        st.session_state.domanda_suggerita = question
+                        logger.info(f"Domanda suggerita button_key!!!!: {question}")
 
                         # Forza rerun per applicare immediatamente le modifiche
                         st.rerun()
