@@ -98,6 +98,7 @@ class ResultVisualizer:
 
                 # Usiamo le opzioni di selettore più eleganti
                 rating_options = {
+                    "": "😐 Nessuna valutazione",
                     "positive": "😀 Utile",
                     "negative": "😕 Non utile"
                 }
@@ -114,8 +115,7 @@ class ResultVisualizer:
                 def on_rating_change():
                     selected = st.session_state[f"rating_select_{query_id}"]
                     st.session_state[f"rating_value_{query_id}"] = selected
-                    st.session_state[f"rating_positive_{query_id}"] = selected in [
-                        "positive", "neutral"]
+                    st.session_state[f"rating_positive_{query_id}"] = selected == "positive"
 
                 # Radio con stile migliorato
                 st.radio(
@@ -132,9 +132,9 @@ class ResultVisualizer:
 
                 # Visualizza un'icona in base alla valutazione scelta
                 selected_rating = st.session_state[f"rating_value_{query_id}"]
-                rating_emoji = "😀" if selected_rating == "positive" else "😐"
+                rating_emoji = "😀" if selected_rating == "positive" else "😐" if not selected_rating else "😕"
                 st.markdown(
-                    f"<h1 style='text-align: center; color: {'green' if selected_rating == 'positive' else 'white' if not selected_rating else 'red'};'>{rating_emoji}</h1>", unsafe_allow_html=True)
+                    f"<h1 style='text-align: center; color: {'green' if selected_rating == 'positive' else 'white' if not selected_rating else 'red'};'>{rating_emoji}</h1>", unsafe_allow_html=True)  # noqa: E501
 
             with col2:
                 # Campo per il feedback
@@ -145,8 +145,11 @@ class ResultVisualizer:
                     height=100
                 )
 
+            col3 = st.columns([1])[0]
+            with col3:
                 # Pulsante di invio
-                if st.button("Invia valutazione", key=f"submit_rating_{query_id}", use_container_width=True):
+                if st.button("Invia valutazione", key=f"submit_rating_{query_id}", use_container_width=True) and st.session_state[f"rating_select_{query_id}"]:
+
                     if rating_manager.submit_rating(
                         query_id=query_id,
                         domanda=data.get("domanda", ""),
@@ -158,11 +161,13 @@ class ResultVisualizer:
                         st.success("✅ Valutazione inviata con successo!")
                     else:
                         st.error("❌ Errore nell'invio della valutazione.")
+                else:
+                    st.warning("⚠️ Seleziona una valutazione prima di inviare.")
 
-            # Se esiste già una valutazione, mostro un messaggio
-            if existing_rating:
-                st.info(
-                    "Hai già valutato questa analisi. Puoi modificare la tua valutazione sopra.")
+                # Se esiste già una valutazione, mostro un messaggio
+                if existing_rating:
+                    st.info(
+                        "Hai già valutato questa analisi. Puoi modificare la tua valutazione sopra.")
 
         # Mostra domande correlate (se disponibili)
         if "related_questions" in data and data["related_questions"]:

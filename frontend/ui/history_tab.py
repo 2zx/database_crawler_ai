@@ -66,7 +66,7 @@ class HistoryTab:
 
             with col2:
                 page_size = st.selectbox("Elementi per pagina", [
-                                         10, 25, 50, 100], index=0)
+                                         5, 10, 25, 50, 100], index=0)
 
             # Inizializza lo stato per la paginazione
             if "history_page" not in st.session_state:
@@ -109,6 +109,19 @@ class HistoryTab:
                     "llm_provider": "LLM",
                     "cache_used": "Cache"
                 })
+
+                # Aggiungi l'intestazione della tabella con stile
+                header_cols = st.columns([3, 10, 2, 1, 1])
+                with header_cols[0]:
+                    st.markdown("**Data/Ora**")
+                with header_cols[1]:
+                    st.markdown("**Domanda**")
+                with header_cols[2]:
+                    st.markdown("**LLM**")
+                with header_cols[3]:
+                    st.markdown("**Cache**")
+                with header_cols[4]:
+                    st.markdown("**Azioni**")
 
                 # Selettore degli elementi con una tecnica diversa
                 row_clicked = False
