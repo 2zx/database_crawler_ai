@@ -130,7 +130,10 @@ class HistoryTab:
                             row_clicked = True
 
                     # Aggiungi una linea sottile tra le righe
-                    st.markdown('<hr style="margin-top: 0; margin-bottom: 0; height: 1px; border: none; background-color: #f0f0f0;">', unsafe_allow_html=True)
+                    st.markdown(
+                        '<hr style="margin-top: 0; margin-bottom: 0; height: 1px; border: none; background-color: #f0f0f0;">',
+                        unsafe_allow_html=True
+                    )
 
                 if row_clicked:
                     st.rerun()

@@ -343,7 +343,8 @@ class RatingStore:
             total_analyses = session.query(AnalysisResult).count()
 
             # Conteggio delle analisi con errori
-            with_errors = session.query(AnalysisResult).filter(AnalysisResult.error != None).filter(AnalysisResult.error != '').count()
+            with_errors = session.query(AnalysisResult).filter(
+                AnalysisResult.error is not None).filter(AnalysisResult.error != '').count()
 
             # Conteggio delle analisi che hanno utilizzato la cache
             cached = session.query(AnalysisResult).filter_by(cache_used=True).count()
@@ -399,4 +400,3 @@ class RatingStore:
                 "rated_percentage": 0,
                 "positive_percentage": 0
             }
-

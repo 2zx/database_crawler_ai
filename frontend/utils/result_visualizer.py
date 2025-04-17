@@ -105,7 +105,8 @@ class ResultVisualizer:
                 # Convertiamo il valore booleano in una delle tre opzioni
                 if f"rating_value_{query_id}" not in st.session_state:
                     if existing_rating:
-                        st.session_state[f"rating_value_{query_id}"] = "positive" if existing_rating.get("positive", True) else "negative"
+                        st.session_state[f"rating_value_{query_id}"] = "positive" if existing_rating.get(
+                            "positive", True) else "negative"
                     else:
                         st.session_state[f"rating_value_{query_id}"] = ""
 
@@ -113,7 +114,8 @@ class ResultVisualizer:
                 def on_rating_change():
                     selected = st.session_state[f"rating_select_{query_id}"]
                     st.session_state[f"rating_value_{query_id}"] = selected
-                    st.session_state[f"rating_positive_{query_id}"] = selected in ["positive", "neutral"]
+                    st.session_state[f"rating_positive_{query_id}"] = selected in [
+                        "positive", "neutral"]
 
                 # Radio con stile migliorato
                 st.radio(
@@ -121,7 +123,8 @@ class ResultVisualizer:
                     options=list(rating_options.keys()),
                     format_func=lambda x: rating_options[x],
                     key=f"rating_select_{query_id}",
-                    index=list(rating_options.keys()).index(st.session_state[f"rating_value_{query_id}"]) if st.session_state[f"rating_value_{query_id}"] else 0,
+                    index=list(rating_options.keys()).index(
+                        st.session_state[f"rating_value_{query_id}"]) if st.session_state[f"rating_value_{query_id}"] else 0,
                     on_change=on_rating_change,
                     horizontal=True,
                     label_visibility="collapsed"
@@ -130,7 +133,8 @@ class ResultVisualizer:
                 # Visualizza un'icona in base alla valutazione scelta
                 selected_rating = st.session_state[f"rating_value_{query_id}"]
                 rating_emoji = "😀" if selected_rating == "positive" else "😐"
-                st.markdown(f"<h1 style='text-align: center; color: {'green' if selected_rating == 'positive' else 'white' if not selected_rating else 'red'};'>{rating_emoji}</h1>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<h1 style='text-align: center; color: {'green' if selected_rating == 'positive' else 'white' if not selected_rating else 'red'};'>{rating_emoji}</h1>", unsafe_allow_html=True)
 
             with col2:
                 # Campo per il feedback
@@ -157,7 +161,8 @@ class ResultVisualizer:
 
             # Se esiste già una valutazione, mostro un messaggio
             if existing_rating:
-                st.info("Hai già valutato questa analisi. Puoi modificare la tua valutazione sopra.")
+                st.info(
+                    "Hai già valutato questa analisi. Puoi modificare la tua valutazione sopra.")
 
         # Mostra domande correlate (se disponibili)
         if "related_questions" in data and data["related_questions"]:
@@ -241,7 +246,8 @@ class ResultVisualizer:
             if key in data:
                 # Per i dati, limitiamo a 1000 record per sicurezza
                 if key == "dati" and data[key]:
-                    cleaned_data[key] = data[key][:1000] if isinstance(data[key], list) else data[key]
+                    cleaned_data[key] = data[key][:1000] if isinstance(
+                        data[key], list) else data[key]
                 else:
                     cleaned_data[key] = data[key]
 
