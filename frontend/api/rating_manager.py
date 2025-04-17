@@ -181,7 +181,6 @@ class RatingManager:
         try:
             response = requests.get(f"{self.backend_url}/ratings/stats")
 
-            logger.info(response)
             if response.status_code == 200:
                 return response.json()
             else:
@@ -190,3 +189,43 @@ class RatingManager:
         except Exception as e:
             st.warning(f"Errore nel recupero delle statistiche: {e}")
             return {"total": 0, "positive": 0, "negative": 0, "positive_percentage": 0}
+
+    def get_all_analysis_stats(self):
+        """
+        Ottiene statistiche complete su tutte le analisi, non solo quelle con valutazioni.
+
+        Returns:
+            dict: Statistiche complete sulle analisi
+        """
+        try:
+            response = requests.get(f"{self.backend_url}/analysis/stats")
+            if response.status_code == 200:
+                return response.json()
+            else:
+                st.warning(f"Non è stato possibile recuperare le statistiche complete. Status: {response.status_code}")
+                return {
+                    "total": 0,
+                    "with_errors": 0,
+                    "cached": 0,
+                    "rated": 0,
+                    "positive": 0,
+                    "negative": 0,
+                    "error_percentage": 0,
+                    "cache_percentage": 0,
+                    "rated_percentage": 0,
+                    "positive_percentage": 0
+                }
+        except Exception as e:
+            st.warning(f"Errore nel recupero delle statistiche complete: {e}")
+            return {
+                "total": 0,
+                "with_errors": 0,
+                "cached": 0,
+                "rated": 0,
+                "positive": 0,
+                "negative": 0,
+                "error_percentage": 0,
+                "cache_percentage": 0,
+                "rated_percentage": 0,
+                "positive_percentage": 0
+            }

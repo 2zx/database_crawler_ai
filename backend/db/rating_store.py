@@ -328,3 +328,75 @@ class RatingStore:
         except Exception as e:
             logger.error(f"❌ Errore nel recupero delle statistiche: {e}")
             return {"total": 0, "positive": 0, "negative": 0, "positive_percentage": 0}
+
+    def get_all_analysis_stats(self):
+        """
+        Ottiene statistiche complete sulle analisi, incluse quelle senza valutazioni.
+
+        Returns:
+            dict: Statistiche sulle analisi
+        """
+        try:
+            session = self.Session()
+
+            # Totale delle analisi
+            total_analyses = session.query(AnalysisResult).count()
+
+            # Conteggio delle analisi con errori
+            with_errors = session.query(AnalysisResult).filter(AnalysisResult.error != None).filter(AnalysisResult.error != '').count()
+
+            # Conteggio delle analisi che hanno utilizzato la cache
+            cached = session.query(AnalysisResult).filter_by(cache_used=True).count()
+
+            # Conteggio delle analisi con valutazione
+            rated = session.query(AnalysisResult).join(
+                QueryRating,
+                AnalysisResult.query_id == QueryRating.query_id,
+                isouter=False
+            ).count()
+
+            # Conteggio delle valutazioni positive e negative
+            positive = session.query(QueryRating).filter_by(positive=True).count()
+            negative = session.query(QueryRating).filter_by(positive=False).count()
+
+            # Percentuale di analisi con errori
+            error_percentage = (with_errors / total_analyses * 100) if total_analyses > 0 else 0
+
+            # Percentuale di utilizzo cache
+            cache_percentage = (cached / total_analyses * 100) if total_analyses > 0 else 0
+
+            # Percentuale di analisi valutate
+            rated_percentage = (rated / total_analyses * 100) if total_analyses > 0 else 0
+
+            # Percentuale di valutazioni positive
+            positive_percentage = (positive / rated * 100) if rated > 0 else 0
+
+            session.close()
+
+            return {
+                "total": total_analyses,
+                "with_errors": with_errors,
+                "cached": cached,
+                "rated": rated,
+                "positive": positive,
+                "negative": negative,
+                "error_percentage": error_percentage,
+                "cache_percentage": cache_percentage,
+                "rated_percentage": rated_percentage,
+                "positive_percentage": positive_percentage
+            }
+        except Exception as e:
+            logger.error(f"❌ Errore nel recupero delle statistiche complete: {e}")
+            return {
+                "total": 0,
+                "with_errors": 0,
+                "cached": 0,
+                "rated": 0,
+                "positive": 0,
+                "negative": 0,
+                "error_percentage": 0,
+                "cache_percentage": 0,
+                "rated_percentage": 0,
+                "positive_percentage": 0
+            }
+

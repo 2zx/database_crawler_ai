@@ -48,7 +48,7 @@ class ResultVisualizer:
         # Visualizza i dati in tabella
         df = pd.DataFrame(data["dati"])
         st.subheader("📋 Dati Analizzati:")
-        st.dataframe(df)
+        st.dataframe(df, hide_index=True)
 
         # Scarica il file Excel
         if not df.empty:
@@ -98,8 +98,7 @@ class ResultVisualizer:
 
                 # Usiamo le opzioni di selettore più eleganti
                 rating_options = {
-                    "positive": "😀 Molto utile",
-                    "neutral": "😐 Utile",
+                    "positive": "😀 Utile",
                     "negative": "😕 Non utile"
                 }
 
@@ -108,7 +107,7 @@ class ResultVisualizer:
                     if existing_rating:
                         st.session_state[f"rating_value_{query_id}"] = "positive" if existing_rating.get("positive", True) else "negative"
                     else:
-                        st.session_state[f"rating_value_{query_id}"] = "neutral"
+                        st.session_state[f"rating_value_{query_id}"] = ""
 
                 # Funzione di callback per il cambio di valutazione
                 def on_rating_change():
@@ -122,7 +121,7 @@ class ResultVisualizer:
                     options=list(rating_options.keys()),
                     format_func=lambda x: rating_options[x],
                     key=f"rating_select_{query_id}",
-                    index=list(rating_options.keys()).index(st.session_state[f"rating_value_{query_id}"]),
+                    index=list(rating_options.keys()).index(st.session_state[f"rating_value_{query_id}"]) if st.session_state[f"rating_value_{query_id}"] else 0,
                     on_change=on_rating_change,
                     horizontal=True,
                     label_visibility="collapsed"
@@ -130,8 +129,8 @@ class ResultVisualizer:
 
                 # Visualizza un'icona in base alla valutazione scelta
                 selected_rating = st.session_state[f"rating_value_{query_id}"]
-                rating_emoji = "😀" if selected_rating == "positive" else "😐" if selected_rating == "neutral" else "😕"
-                st.markdown(f"<h1 style='text-align: center; color: {'green' if selected_rating == 'positive' else 'orange' if selected_rating == 'neutral' else 'red'};'>{rating_emoji}</h1>", unsafe_allow_html=True)
+                rating_emoji = "😀" if selected_rating == "positive" else "😐"
+                st.markdown(f"<h1 style='text-align: center; color: {'green' if selected_rating == 'positive' else 'white' if not selected_rating else 'red'};'>{rating_emoji}</h1>", unsafe_allow_html=True)
 
             with col2:
                 # Campo per il feedback

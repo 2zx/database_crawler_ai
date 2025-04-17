@@ -70,6 +70,46 @@ def save_analysis_result(request: AnalysisResultRequest):
     raise HTTPException(status_code=500, detail="Errore nel salvataggio del risultato")
 
 
+@router.get("/analysis_results")
+def get_all_analysis_results(limit: int = 50, offset: int = 0):
+    """
+    Recupera tutti i risultati delle analisi.
+
+    Args:
+        limit (int): Limite di risultati
+        offset (int): Offset per la paginazione
+
+    Returns:
+        list: Lista di risultati
+    """
+    return rating_store.get_all_analysis_results(limit, offset)
+
+
+@router.get("/ratings/stats")
+def get_ratings_stats():
+    """
+    Ottiene statistiche sulle valutazioni.
+
+    Returns:
+        dict: Statistiche sulle valutazioni
+    """
+    return rating_store.get_ratings_stats()
+
+
+@router.get("/analysis/stats")
+def get_all_analysis_stats():
+    """
+    Ottiene statistiche complete su tutte le analisi.
+
+    Returns:
+        dict: Statistiche dettagliate sulle analisi
+    """
+    logger.info("Chiamata all'endpoint /analysis/stats")
+    stats = rating_store.get_all_analysis_stats()
+    logger.info(f"Statistiche complete analisi: {stats}")
+    return stats
+
+
 @router.get("/ratings/{query_id}")
 def get_rating(query_id: str):
     """
@@ -102,29 +142,3 @@ def get_analysis_result(query_id: str):
     if result:
         return result
     raise HTTPException(status_code=404, detail="Risultato non trovato")
-
-
-@router.get("/analysis_results")
-def get_all_analysis_results(limit: int = 50, offset: int = 0):
-    """
-    Recupera tutti i risultati delle analisi.
-
-    Args:
-        limit (int): Limite di risultati
-        offset (int): Offset per la paginazione
-
-    Returns:
-        list: Lista di risultati
-    """
-    return rating_store.get_all_analysis_results(limit, offset)
-
-
-@router.get("/ratings/stats")
-def get_ratings_stats():
-    """
-    Ottiene statistiche sulle valutazioni.
-
-    Returns:
-        dict: Statistiche sulle valutazioni
-    """
-    return rating_store.get_ratings_stats()
