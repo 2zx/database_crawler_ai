@@ -4,7 +4,6 @@ Gestisce l'interfaccia utente per la tab di storico delle analisi.
 import streamlit as st  # type: ignore
 import pandas as pd  # type: ignore
 from datetime import datetime
-from frontend.utils import ResultVisualizer
 
 
 class HistoryTab:
@@ -131,37 +130,45 @@ class HistoryTab:
                         selected_query_id)
 
                     if analysis_details:
-                        # Recupera la valutazione se esistente
-                        rating = self.rating_manager.get_rating(
-                            selected_query_id)
 
                         # Visualizza i dettagli dell'analisi
                         with st.expander("Dettagli Query", expanded=True):
-                            st.markdown(
-                                f"**Domanda**: {analysis_details.get('domanda', '')}")
-                            st.markdown(
-                                f"**Data**: {datetime.fromisoformat(analysis_details.get('timestamp', '')).strftime('%d/%m/%Y %H:%M')}")
-                            st.markdown(
-                                f"**LLM**: {analysis_details.get('llm_provider', 'N/A')}")
-                            st.markdown(
-                                f"**Cache**: {'Sì' if analysis_details.get('cache_used', False) else 'No'}")
+                            st.markdown(f"**Domanda**: {analysis_details.get('domanda', '')}")
+                            st.markdown(f"**Data**: {datetime.fromisoformat(analysis_details.get('timestamp', '')).strftime('%d/%m/%Y %H:%M')}")
+                            st.markdown(f"**LLM**: {analysis_details.get('llm_provider', 'N/A')}")
+                            st.markdown(f"**Cache**: {'Sì' if analysis_details.get('cache_used', False) else 'No'}")
 
                             if analysis_details.get('execution_time'):
-                                st.markdown(
-                                    f"**Tempo di esecuzione**: {analysis_details.get('execution_time')} ms")
+                                st.markdown(f"**Tempo di esecuzione**: {analysis_details.get('execution_time')} ms")
 
-                            st.code(analysis_details.get(
-                                'query_sql', ''), language="sql")
+                            # Mostra se ci sono stati errori
+                            if analysis_details.get('error'):
+                                st.error(f"**Errore**: {analysis_details.get('error', '')}")
+                                with st.expander("Dettagli errore"):
+                                    st.code(analysis_details.get('error_traceback', ''))
 
-                        # Visualizza l'analisi dei risultati
-                        ResultVisualizer.display_results({
-                            "descrizione": analysis_details.get('descrizione', ''),
-                            "dati": analysis_details.get('dati', []),
-                            "query_sql": analysis_details.get('query_sql', ''),
-                            "grafici": analysis_details.get('grafico_path'),
-                            "llm_provider": analysis_details.get('llm_provider'),
-                            "cache_used": analysis_details.get('cache_used', False)
-                        })
+                            # Mostra la query SQL se presente
+                            if analysis_details.get('query_sql'):
+                                st.code(analysis_details.get('query_sql', ''), language="sql")
+
+                        # Visualizza i dati dell'analisi solo se non ci sono errori o se ci sono dati nonostante l'errore
+                        has_data = len(analysis_details.get('dati', [])) > 0
+
+                        if not analysis_details.get('error') or has_data:
+                            # Crea un DataFrame dai dati
+                            if has_data:
+                                df = pd.DataFrame(analysis_details.get('dati', []))
+                                st.subheader("📋 Dati dell'analisi:")
+                                st.dataframe(df, height=400)
+
+                        # Visualizza la descrizione
+                        if analysis_details.get('descrizione'):
+                            st.subheader("📝 Descrizione")
+                            st.write(analysis_details.get('descrizione', ''))
+
+                        # Recupera la valutazione se esistente
+                        rating = self.rating_manager.get_rating(
+                            selected_query_id)
 
                         # Mostra la valutazione se esistente
                         if rating:

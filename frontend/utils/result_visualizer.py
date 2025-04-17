@@ -90,22 +90,48 @@ class ResultVisualizer:
             if f"rating_feedback_{query_id}" not in st.session_state:
                 st.session_state[f"rating_feedback_{query_id}"] = default_feedback
 
-            # Interfaccia di valutazione
+            # Interfaccia di valutazione con design migliorato
             col1, col2 = st.columns([1, 3])
 
             with col1:
-                # Pulsanti per voto positivo/negativo
-                if st.button("👍 Utile", key=f"rating_pos_{query_id}",
-                             use_container_width=True,
-                             type="primary" if st.session_state[f"rating_positive_{query_id}"] else "secondary"):
-                    st.session_state[f"rating_positive_{query_id}"] = True
-                    st.rerun()
+                st.write("##### Valutazione:")
 
-                if st.button("👎 Non utile", key=f"rating_neg_{query_id}",
-                             use_container_width=True,
-                             type="primary" if not st.session_state[f"rating_positive_{query_id}"] else "secondary"):
-                    st.session_state[f"rating_positive_{query_id}"] = False
-                    st.rerun()
+                # Usiamo le opzioni di selettore più eleganti
+                rating_options = {
+                    "positive": "😀 Molto utile",
+                    "neutral": "😐 Utile",
+                    "negative": "😕 Non utile"
+                }
+
+                # Convertiamo il valore booleano in una delle tre opzioni
+                if f"rating_value_{query_id}" not in st.session_state:
+                    if existing_rating:
+                        st.session_state[f"rating_value_{query_id}"] = "positive" if existing_rating.get("positive", True) else "negative"
+                    else:
+                        st.session_state[f"rating_value_{query_id}"] = "neutral"
+
+                # Funzione di callback per il cambio di valutazione
+                def on_rating_change():
+                    selected = st.session_state[f"rating_select_{query_id}"]
+                    st.session_state[f"rating_value_{query_id}"] = selected
+                    st.session_state[f"rating_positive_{query_id}"] = selected in ["positive", "neutral"]
+
+                # Radio con stile migliorato
+                st.radio(
+                    "Quanto ti è stata utile questa analisi?",
+                    options=list(rating_options.keys()),
+                    format_func=lambda x: rating_options[x],
+                    key=f"rating_select_{query_id}",
+                    index=list(rating_options.keys()).index(st.session_state[f"rating_value_{query_id}"]),
+                    on_change=on_rating_change,
+                    horizontal=True,
+                    label_visibility="collapsed"
+                )
+
+                # Visualizza un'icona in base alla valutazione scelta
+                selected_rating = st.session_state[f"rating_value_{query_id}"]
+                rating_emoji = "😀" if selected_rating == "positive" else "😐" if selected_rating == "neutral" else "😕"
+                st.markdown(f"<h1 style='text-align: center; color: {'green' if selected_rating == 'positive' else 'orange' if selected_rating == 'neutral' else 'red'};'>{rating_emoji}</h1>", unsafe_allow_html=True)
 
             with col2:
                 # Campo per il feedback
@@ -117,7 +143,7 @@ class ResultVisualizer:
                 )
 
                 # Pulsante di invio
-                if st.button("Invia valutazione", key=f"submit_rating_{query_id}"):
+                if st.button("Invia valutazione", key=f"submit_rating_{query_id}", use_container_width=True):
                     if rating_manager.submit_rating(
                         query_id=query_id,
                         domanda=data.get("domanda", ""),
@@ -132,8 +158,7 @@ class ResultVisualizer:
 
             # Se esiste già una valutazione, mostro un messaggio
             if existing_rating:
-                st.info(
-                    "Hai già valutato questa analisi. Puoi modificare la tua valutazione sopra.")
+                st.info("Hai già valutato questa analisi. Puoi modificare la tua valutazione sopra.")
 
         # Mostra domande correlate (se disponibili)
         if "related_questions" in data and data["related_questions"]:
@@ -173,21 +198,52 @@ class ResultVisualizer:
             bool: True se il salvataggio è riuscito, False altrimenti
         """
         try:
-            # Estrai solo i primi 1000 record di dati per evitare problemi di dimensione
-            dati_limitati = data.get("dati", [])[
-                :1000] if data.get("dati") else []
+            cleaned_data = ResultVisualizer.clean_data_for_storage(data)
 
             return rating_manager.save_analysis_result(
                 query_id=query_id,
-                domanda=data.get("domanda", ""),
-                query_sql=data.get("query_sql", ""),
-                descrizione=data.get("descrizione", ""),
-                dati=dati_limitati,
-                grafico_path=data.get("grafici", ""),
-                llm_provider=data.get("llm_provider"),
-                cache_used=data.get("cache_used", False),
-                execution_time=data.get("execution_time")
+                domanda=cleaned_data.get("domanda", ""),
+                query_sql=cleaned_data.get("query_sql", ""),
+                descrizione=cleaned_data.get("descrizione", ""),
+                dati=cleaned_data.get("dati", ""),
+                grafico_path="",
+                llm_provider=cleaned_data.get("llm_provider"),
+                cache_used=cleaned_data.get("cache_used", False),
+                execution_time=cleaned_data.get("execution_time"),
+                error=cleaned_data.get("error", None),
+                error_traceback=cleaned_data.get("error_traceback", None)
             )
         except Exception as e:
             logger.error(f"Errore nel salvataggio del risultato: {e}")
             return False
+
+    @staticmethod
+    def clean_data_for_storage(data):
+        """
+        Pulisce i dati prima del salvataggio, rimuovendo elementi UI e limitando i dati.
+
+        Args:
+            data (dict): Dati originali da pulire
+
+        Returns:
+            dict: Dati puliti pronti per il salvataggio
+        """
+        # Crea una copia dei dati per non modificare l'originale
+        cleaned_data = {}
+
+        # Copia solo i campi che vogliamo salvare
+        safe_keys = [
+            "domanda", "query_sql", "descrizione", "dati", "grafici",
+            "llm_provider", "cache_used", "execution_time",
+            "error", "error_traceback", "attempts"
+        ]
+
+        for key in safe_keys:
+            if key in data:
+                # Per i dati, limitiamo a 1000 record per sicurezza
+                if key == "dati" and data[key]:
+                    cleaned_data[key] = data[key][:1000] if isinstance(data[key], list) else data[key]
+                else:
+                    cleaned_data[key] = data[key]
+
+        return cleaned_data

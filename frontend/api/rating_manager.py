@@ -3,6 +3,10 @@ Gestisce le operazioni relative alle valutazioni delle query e allo storico.
 """
 import requests  # type: ignore
 import streamlit as st  # type: ignore
+import logging
+
+# Configurazione del logging
+logger = logging.getLogger(__name__)
 
 
 class RatingManager:
@@ -54,21 +58,24 @@ class RatingManager:
             return False
 
     def save_analysis_result(
-            self, query_id, domanda, query_sql, descrizione, dati, grafico_path,
-            llm_provider=None, cache_used=False, execution_time=None):
+            self, query_id, domanda, query_sql=None, descrizione=None, dati=None,
+            grafico_path=None, llm_provider=None, cache_used=False, execution_time=None,
+            error=None, error_traceback=None):
         """
         Salva il risultato di un'analisi.
 
         Args:
             query_id (str): ID della query
             domanda (str): Domanda originale
-            query_sql (str): Query SQL eseguita
-            descrizione (str): Descrizione testuale dei risultati
-            dati (list): Dati risultanti dall'analisi
-            grafico_path (str): Percorso del grafico generato
+            query_sql (str, optional): Query SQL eseguita
+            descrizione (str, optional): Descrizione testuale dei risultati
+            dati (list, optional): Dati risultanti dall'analisi
+            grafico_path (str, optional): Percorso del grafico generato
             llm_provider (str, optional): Provider LLM utilizzato
             cache_used (bool): Se è stata usata la cache
             execution_time (int, optional): Tempo di esecuzione in ms
+            error (str, optional): Messaggio di errore se presente
+            error_traceback (str, optional): Traceback dell'errore se presente
 
         Returns:
             bool: True se il salvataggio è riuscito, False altrimenti
@@ -85,7 +92,9 @@ class RatingManager:
                     "grafico_path": grafico_path,
                     "llm_provider": llm_provider,
                     "cache_used": cache_used,
-                    "execution_time": execution_time
+                    "execution_time": execution_time,
+                    "error": error,
+                    "error_traceback": error_traceback
                 }
             )
             if response.status_code == 200:
@@ -171,6 +180,8 @@ class RatingManager:
         """
         try:
             response = requests.get(f"{self.backend_url}/ratings/stats")
+
+            logger.info(response)
             if response.status_code == 200:
                 return response.json()
             else:

@@ -129,3 +129,5 @@ class AnalysisResultRequest(BaseModel):
     llm_provider: Optional[str] = Field(None, description="Provider LLM utilizzato")
     cache_used: bool = Field(False, description="Se è stata usata la cache")
     execution_time: Optional[int] = Field(None, description="Tempo di esecuzione in ms")
+    error: Optional[str] = Field(None, description="Messaggio di errore")
+    error_traceback: Optional[str] = Field(None, description="Traceback completo dell'errore")

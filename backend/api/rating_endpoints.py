@@ -60,7 +60,9 @@ def save_analysis_result(request: AnalysisResultRequest):
         grafico_path=request.grafico_path,
         llm_provider=request.llm_provider,
         cache_used=request.cache_used,
-        execution_time=request.execution_time
+        execution_time=request.execution_time,
+        error=request.error,
+        error_traceback=request.error_traceback
     )
 
     if result_id:

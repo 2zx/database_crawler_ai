@@ -47,6 +47,8 @@ class AnalysisResult(Base):
     llm_provider = Column(String, nullable=True)
     cache_used = Column(Boolean, default=False)
     execution_time = Column(Integer, nullable=True)  # Tempo in millisecondi
+    error = Column(Text, nullable=True)  # Messaggio di errore
+    error_traceback = Column(Text, nullable=True)  # Traceback completo dell'errore
 
     def __repr__(self):
         return f"<AnalysisResult(id='{self.id}', query_id='{self.query_id}')>"
@@ -117,21 +119,23 @@ class RatingStore:
             return None
 
     def save_analysis_result(
-            self, query_id, domanda, query_sql, descrizione, dati, grafico_path,
-            llm_provider=None, cache_used=False, execution_time=None):
+            self, query_id, domanda, query_sql=None, descrizione=None, dati=None, grafico_path=None,
+            llm_provider=None, cache_used=False, execution_time=None, error=None, error_traceback=None):
         """
         Salva il risultato di un'analisi nel database.
 
         Args:
             query_id (str): ID della query
             domanda (str): La domanda dell'utente
-            query_sql (str): La query SQL eseguita
-            descrizione (str): Descrizione testuale dei risultati
-            dati (list): Dati risultanti dall'analisi
-            grafico_path (str): Percorso del grafico generato
+            query_sql (str, optional): La query SQL eseguita
+            descrizione (str, optional): Descrizione testuale dei risultati
+            dati (list, optional): Dati risultanti dall'analisi
+            grafico_path (str, optional): Percorso del grafico generato
             llm_provider (str, optional): Provider LLM utilizzato
             cache_used (bool): Se è stata usata la cache
             execution_time (int, optional): Tempo di esecuzione in ms
+            error (str, optional): Messaggio di errore se presente
+            error_traceback (str, optional): Traceback completo dell'errore se presente
 
         Returns:
             int: L'ID del risultato inserito
@@ -148,13 +152,23 @@ class RatingStore:
             if existing:
                 # Aggiorna il risultato esistente
                 existing.domanda = domanda
-                existing.query_sql = query_sql
-                existing.descrizione = descrizione
-                existing.dati_json = dati_json
-                existing.grafico_path = grafico_path
-                existing.llm_provider = llm_provider
+                if query_sql is not None:
+                    existing.query_sql = query_sql
+                if descrizione is not None:
+                    existing.descrizione = descrizione
+                if dati_json is not None:
+                    existing.dati_json = dati_json
+                if grafico_path is not None:
+                    existing.grafico_path = grafico_path
+                if llm_provider is not None:
+                    existing.llm_provider = llm_provider
                 existing.cache_used = cache_used
-                existing.execution_time = execution_time
+                if execution_time is not None:
+                    existing.execution_time = execution_time
+                if error is not None:
+                    existing.error = error
+                if error_traceback is not None:
+                    existing.error_traceback = error_traceback
                 existing.timestamp = datetime.now().isoformat()
                 session.commit()
                 result_id = existing.id
@@ -170,7 +184,9 @@ class RatingStore:
                     grafico_path=grafico_path,
                     llm_provider=llm_provider,
                     cache_used=cache_used,
-                    execution_time=execution_time
+                    execution_time=execution_time,
+                    error=error,
+                    error_traceback=error_traceback
                 )
                 session.add(result)
                 session.commit()
@@ -245,7 +261,10 @@ class RatingStore:
                     "timestamp": result.timestamp,
                     "llm_provider": result.llm_provider,
                     "cache_used": result.cache_used,
-                    "execution_time": result.execution_time
+                    "execution_time": result.execution_time,
+                    "error": result.error,
+                    "error_traceback": result.error_traceback,
+                    "has_error": result.error is not None and len(result.error) > 0
                 }
             else:
                 return None
