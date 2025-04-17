@@ -73,13 +73,16 @@ class ResultVisualizer:
                 with col1:
                     st.write(f"{i+1}. {question}")
                 with col2:
-                    # Usiamo un key univoco per ogni bottone
-                    button_key = f"explore_{i}_{hash(question)}"
-                    if st.button("🔍", key=button_key):
+                    # Funzione di callback per il click
+                    def create_click_handler(q):
+                        def click_handler():
+                            st.session_state.domanda_suggerita = q
+                            logger.info(f"Domanda selezionata create_click_handler: {q}")
 
-                        # Imposta direttamente la domanda
-                        st.session_state.domanda_suggerita = question
-                        logger.info(f"Domanda suggerita button_key!!!!: {question}")
+                        return click_handler
 
-                        # Forza rerun per applicare immediatamente le modifiche
-                        st.rerun()
+                    # Crea un bottone con callback personalizzato
+                    st.button(
+                        "🔍", key=f"btn_{i}_{hash(question)%10000}",
+                        on_click=create_click_handler(question)
+                    )

@@ -83,10 +83,6 @@ class AnalysisTab:
             selected = st.session_state.domanda_selector
             st.session_state.domanda_corrente = selected if selected != "---" else ""
 
-        logger.info(f"Domanda domanda_suggerita: {st.session_state.domanda_suggerita}")
-        logger.info(f"Domanda domanda_corrente: {st.session_state.domanda_corrente}")
-        logger.info(f"Domanda domanda_selector: {st.session_state.domanda_selector}")
-
         if st.session_state.domanda_suggerita:
             st.session_state.domanda_selector = "---"
             st.session_state.domanda_corrente = st.session_state.domanda_suggerita
@@ -124,6 +120,10 @@ class AnalysisTab:
             # Callback quando viene premuto il bottone Cerca
             def on_cerca_click():
                 st.session_state.cerca_clicked = True
+                if "query_results" in st.session_state:
+                    # Se ci sono risultati precedenti, li rimuoviamo
+                    del st.session_state.query_results
+
                 # Salviamo la domanda corrente (sia da selectbox che da text_area)
                 if domanda_testo:  # Se c'è qualcosa nella textarea, prendi quella
                     st.session_state.domanda_corrente = domanda_testo
@@ -183,8 +183,9 @@ class AnalysisTab:
                         if "error" in status_data:
                             st.error(f"❌ {status_data['error']}")
                         elif status == "completed" and "result" in status_data:
-                            result_data = status_data["result"]
-                            ResultVisualizer.display_results(result_data)
+                            # Salva i risultati nella session_state
+                            st.session_state.query_results = status_data["result"]
+                            ResultVisualizer.display_results(st.session_state.query_results)
 
                         if "error_traceback" in status_data:
                             with st.expander("Dettagli errore"):
@@ -204,6 +205,9 @@ class AnalysisTab:
                 st.session_state.query_in_progress = False
                 st.session_state.query_id = None
                 st.session_state.query_status = {}
+
+        elif not st.session_state.query_in_progress and "query_results" in st.session_state and st.session_state.query_results:
+            ResultVisualizer.display_results(st.session_state.query_results)
 
         return {
             "action": "cerca" if st.session_state.cerca_clicked else ("refresh" if st.session_state.refresh_clicked else None),

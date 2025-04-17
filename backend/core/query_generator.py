@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError  # type: ignore
 from backend.utils.logging import get_logger
 from backend.utils.helpers import clean_query, clean_generated_code
 from backend.core.llm_manager import get_llm_instance
-from backend.config import CHARTS_DIR, MAX_QUERY_ATTEMPTS, MAX_TOKEN_DEFAULT
+from backend.config import CHARTS_DIR, MAX_QUERY_ATTEMPTS
 
 # Configura il logging
 logger = get_logger(__name__)
@@ -215,7 +215,7 @@ def generate_query_with_retry(
 
     # Base progresso: ogni tentativo vale circa il 10% del totale (40-70%)
     progress_base = 40
-    progress_per_attempt = 10
+    progress_per_attempt = (60 - progress_base) / max_attempts
 
     while attempts < max_attempts:
         attempts += 1
