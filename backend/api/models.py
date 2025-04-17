@@ -105,3 +105,27 @@ class AvailableModelsResponse(BaseModel):
     claude: List[AvailableModel]
     deepseek: List[AvailableModel]
     gemini: List[AvailableModel]
+
+
+# Nuovi modelli per le valutazioni
+class RatingRequest(BaseModel):
+    """Richiesta di invio di una valutazione."""
+    query_id: str = Field(..., description="ID della query")
+    domanda: str = Field(..., description="Domanda originale")
+    query_sql: str = Field(..., description="Query SQL eseguita")
+    positive: bool = Field(..., description="Se la valutazione è positiva")
+    feedback: Optional[str] = Field(None, description="Feedback testuale dell'utente")
+    llm_provider: Optional[str] = Field(None, description="Provider LLM utilizzato")
+
+
+class AnalysisResultRequest(BaseModel):
+    """Richiesta di salvataggio di un risultato di analisi."""
+    query_id: str = Field(..., description="ID della query")
+    domanda: str = Field(..., description="Domanda originale")
+    query_sql: str = Field(..., description="Query SQL eseguita")
+    descrizione: Optional[str] = Field(None, description="Descrizione testuale dei risultati")
+    dati: Optional[List[Dict[str, Any]]] = Field(None, description="Dati risultanti dall'analisi")
+    grafico_path: Optional[str] = Field(None, description="Percorso del grafico generato")
+    llm_provider: Optional[str] = Field(None, description="Provider LLM utilizzato")
+    cache_used: bool = Field(False, description="Se è stata usata la cache")
+    execution_time: Optional[int] = Field(None, description="Tempo di esecuzione in ms")

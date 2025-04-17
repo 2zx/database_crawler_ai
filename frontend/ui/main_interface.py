@@ -8,7 +8,7 @@ from frontend.config import APP_TITLE, LLM_PROVIDERS
 class UserInterface:
     """Gestisce l'interfaccia utente dell'applicazione."""
 
-    def __init__(self, credentials_manager, llm_manager, hint_manager, backend_client):
+    def __init__(self, credentials_manager, llm_manager, hint_manager, backend_client, rating_manager):
         """
         Inizializza l'interfaccia utente.
 
@@ -17,21 +17,25 @@ class UserInterface:
             llm_manager: Gestore dei modelli LLM
             hint_manager: Gestore degli hint
             backend_client: Client per comunicazione con il backend
+            rating_manager: Gestore delle valutazioni e dello storico
         """
         self.credentials_manager = credentials_manager
         self.llm_manager = llm_manager
         self.hint_manager = hint_manager
         self.backend_client = backend_client
+        self.rating_manager = None  # Inizializzato in un altro punto
 
         # Importiamo qui i moduli UI per evitare dipendenze circolari
         from frontend.ui.analysis_tab import AnalysisTab
         from frontend.ui.hints_tab import HintsTab
         from frontend.ui.config_tab import ConfigTab
+        from frontend.ui.history_tab import HistoryTab
 
         # Inizializziamo i tab
-        self.analysis_tab = AnalysisTab(credentials_manager, llm_manager, hint_manager, backend_client)
+        self.analysis_tab = AnalysisTab(credentials_manager, llm_manager, hint_manager, backend_client, rating_manager)
         self.hints_tab = HintsTab(hint_manager)
         self.config_tab = ConfigTab(credentials_manager, llm_manager, hint_manager, backend_client)
+        self.history_tab = HistoryTab(rating_manager)
 
     def render_sidebar(self):
         """Visualizza la sidebar con le impostazioni."""
@@ -357,7 +361,7 @@ class UserInterface:
         st.write("")
 
         # Creiamo i tabs per le diverse sezioni
-        tab1, tab2, tab3 = st.tabs(["📊 Analisi Dati", "✏️ Hint Interpretazione", "⚙️ Configurazioni"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Analisi Dati", "✏️ Hint Interpretazione", "📚 Storico", "⚙️ Configurazioni"])
 
         # Renderizza i contenuti nei diversi tab
         with tab1:
@@ -367,6 +371,9 @@ class UserInterface:
             self.hints_tab.render()
 
         with tab3:
+            self.history_tab.render()
+
+        with tab4:
             self.config_tab.render()
 
         # Ritorna il valore dell'azione dall'analysis_tab

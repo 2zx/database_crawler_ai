@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from frontend.config import STREAMLIT_CONFIG, BACKEND_URL, CREDENTIALS_FILE
 from frontend.auth import AuthManager
 from frontend.utils import CredentialsManager
-from frontend.api import BackendClient, LLMManager, HintManager
+from frontend.api import BackendClient, LLMManager, HintManager, RatingManager
 from frontend.ui import UserInterface
 
 # Configurazione del logging
@@ -33,6 +33,7 @@ def main():
     llm_manager = LLMManager(BACKEND_URL)
     hint_manager = HintManager(BACKEND_URL)
     backend_client = BackendClient(BACKEND_URL)
+    rating_manager = RatingManager(BACKEND_URL)
 
     # Verifica del login
     if not auth_manager.check_login():
@@ -43,7 +44,7 @@ def main():
     auth_manager.logout()
 
     # Initializza l'interfaccia utente
-    ui = UserInterface(credentials_manager, llm_manager, hint_manager, backend_client)
+    ui = UserInterface(credentials_manager, llm_manager, hint_manager, backend_client, rating_manager)
 
     # Rendering della sidebar
     ui.render_sidebar()

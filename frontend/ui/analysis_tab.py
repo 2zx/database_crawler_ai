@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class AnalysisTab:
     """Gestisce l'interfaccia per la tab di analisi dati."""
 
-    def __init__(self, credentials_manager, llm_manager, hint_manager, backend_client):
+    def __init__(self, credentials_manager, llm_manager, hint_manager, backend_client, rating_manager):
         """
         Inizializza la tab di analisi.
 
@@ -28,6 +28,7 @@ class AnalysisTab:
         self.llm_manager = llm_manager
         self.hint_manager = hint_manager
         self.backend_client = backend_client
+        self.rating_manager = rating_manager
 
     def render(self):
         """
@@ -185,7 +186,11 @@ class AnalysisTab:
                         elif status == "completed" and "result" in status_data:
                             # Salva i risultati nella session_state
                             st.session_state.query_results = status_data["result"]
-                            ResultVisualizer.display_results(st.session_state.query_results)
+                            ResultVisualizer.display_results(
+                                st.session_state.query_results,
+                                self.rating_manager,
+                                st.session_state.query_id
+                            )
 
                         if "error_traceback" in status_data:
                             with st.expander("Dettagli errore"):
@@ -207,7 +212,11 @@ class AnalysisTab:
                 st.session_state.query_status = {}
 
         elif not st.session_state.query_in_progress and "query_results" in st.session_state and st.session_state.query_results:
-            ResultVisualizer.display_results(st.session_state.query_results)
+            ResultVisualizer.display_results(
+                st.session_state.query_results,
+                self.rating_manager,
+                st.session_state.query_id
+            )
 
         return {
             "action": "cerca" if st.session_state.cerca_clicked else ("refresh" if st.session_state.refresh_clicked else None),
